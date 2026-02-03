@@ -1,0 +1,23 @@
+# Configuration
+.env
+
+# Données exportées (sensibles)
+data/
+
+# Build
+bin/
+
+# Quarto
+*_files/
+*_cache/
+.quarto/
+*.pdf
+*.html
+
+# Task
+.task/
+
+# macOS
+.DS_Store
+rapport-analyse-premiere-vague.qmd
+.Rhistory

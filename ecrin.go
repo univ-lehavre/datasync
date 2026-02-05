@@ -2,10 +2,11 @@
 //
 // Usage:
 //
+//	go run ecrin.go              # Lance le menu interactif
 //	go run ecrin.go metadata     # Récupère les métadonnées REDCap
 //	go run ecrin.go instruments  # Affiche la liste des instruments
 //	go run ecrin.go export       # Exporte les données en CSV
-//	go run ecrin.go consents     # Récupère les consentements
+//	go run ecrin.go diffusion    # Récupère les paramètres de diffusion
 //	go run ecrin.go rapport      # Compile le rapport Quarto en PDF
 //	go run ecrin.go clean        # Supprime les fichiers générés
 package main
@@ -29,6 +30,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/fatih/color"
+	"github.com/manifoldco/promptui"
 	"github.com/urfave/cli/v2"
 )
 
@@ -234,14 +236,14 @@ func getRecordsWithFields(apiURL, token string, fields []string) ([]map[string]a
 	return records, nil
 }
 
-func findConsentFields(metadata []Variable) []Variable {
-	var consents []Variable
+func findDiffusionFields(metadata []Variable) []Variable {
+	var fields []Variable
 	for _, v := range metadata {
-		if strings.HasSuffix(v.FieldName, "_consent") || strings.Contains(v.FieldName, "_consent_") {
-			consents = append(consents, v)
+		if strings.HasSuffix(v.FieldName, "_identification_level") || strings.HasSuffix(v.FieldName, "_audience") {
+			fields = append(fields, v)
 		}
 	}
-	return consents
+	return fields
 }
 
 func saveJSON(data any, filepath string) error {
@@ -255,6 +257,140 @@ func saveJSON(data any, filepath string) error {
 	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(data)
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
+func printRecordsTable(records []map[string]any, columns []string, maxRows int) {
+	if len(records) == 0 || len(columns) == 0 {
+		return
+	}
+
+	// Calculer les largeurs de colonnes
+	colWidths := make([]int, len(columns))
+	maxColWidth := 25
+	for i, col := range columns {
+		colWidths[i] = len(col)
+	}
+
+	rowCount := len(records)
+	if rowCount > maxRows {
+		rowCount = maxRows
+	}
+
+	for i := 0; i < rowCount; i++ {
+		for j, col := range columns {
+			if v, ok := records[i][col]; ok {
+				valStr := fmt.Sprintf("%v", v)
+				if len(valStr) > colWidths[j] {
+					colWidths[j] = len(valStr)
+				}
+			}
+		}
+	}
+
+	// Limiter la largeur max
+	for i := range colWidths {
+		if colWidths[i] > maxColWidth {
+			colWidths[i] = maxColWidth
+		}
+	}
+
+	// Afficher l'en-tête
+	fmt.Print("  ")
+	for i, col := range columns {
+		fmt.Printf("%-*s ", colWidths[i], truncateString(col, colWidths[i]))
+	}
+	fmt.Println()
+
+	// Ligne de séparation
+	fmt.Print("  ")
+	for i := range columns {
+		fmt.Print(strings.Repeat("─", colWidths[i]) + " ")
+	}
+	fmt.Println()
+
+	// Afficher les lignes
+	for i := 0; i < rowCount; i++ {
+		fmt.Print("  ")
+		for j, col := range columns {
+			val := ""
+			if v, ok := records[i][col]; ok {
+				val = fmt.Sprintf("%v", v)
+			}
+			fmt.Printf("%-*s ", colWidths[j], truncateString(val, colWidths[j]))
+		}
+		fmt.Println()
+	}
+
+	if len(records) > maxRows {
+		fmt.Printf("  %s\n", color.HiBlackString("... et %d autres lignes", len(records)-maxRows))
+	}
+}
+
+func printRecordsStats(records []map[string]any, columns []string) {
+	if len(records) == 0 {
+		return
+	}
+
+	fmt.Printf("\n  %s\n", bold("Statistiques:"))
+
+	for _, col := range columns {
+		valueCounts := make(map[string]int)
+		emptyCount := 0
+
+		for _, r := range records {
+			if v, ok := r[col]; ok {
+				valStr := fmt.Sprintf("%v", v)
+				if valStr == "" || valStr == "<nil>" {
+					emptyCount++
+				} else {
+					valueCounts[valStr]++
+				}
+			} else {
+				emptyCount++
+			}
+		}
+
+		// Afficher les stats pour cette colonne
+		fmt.Printf("\n    %s:\n", cyan(col))
+
+		if emptyCount > 0 {
+			pct := float64(emptyCount) * 100 / float64(len(records))
+			fmt.Printf("      %s %d (%.0f%%)\n", color.HiBlackString("Vide:"), emptyCount, pct)
+		}
+
+		// Trier par fréquence et afficher les valeurs
+		type kv struct {
+			Key   string
+			Value int
+		}
+		var sorted []kv
+		for k, v := range valueCounts {
+			sorted = append(sorted, kv{k, v})
+		}
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Value > sorted[j].Value
+		})
+
+		// Afficher max 5 valeurs
+		maxDisplay := 5
+		if len(sorted) < maxDisplay {
+			maxDisplay = len(sorted)
+		}
+		for i := 0; i < maxDisplay; i++ {
+			pct := float64(sorted[i].Value) * 100 / float64(len(records))
+			fmt.Printf("      %s: %d (%.0f%%)\n", truncateString(sorted[i].Key, 30), sorted[i].Value, pct)
+		}
+		if len(sorted) > 5 {
+			fmt.Printf("      %s\n", color.HiBlackString("... et %d autres valeurs", len(sorted)-5))
+		}
+	}
 }
 
 func generateVariablesCSV(metadata []Variable, filepath string) error {
@@ -440,6 +576,14 @@ func cmdExport(c *cli.Context) error {
 	fmt.Printf("\n%s %s enregistrements exportés\n", green("✓"), bold(fmt.Sprintf("%d", len(records))))
 	fmt.Printf("  → %s\n\n", cyan(outPath))
 
+	// Aperçu des données
+	fmt.Printf("  %s\n\n", bold("Aperçu des données:"))
+	previewCols := keys
+	if len(previewCols) > 6 {
+		previewCols = previewCols[:6]
+	}
+	printRecordsTable(records, previewCols, 5)
+
 	return nil
 }
 
@@ -509,12 +653,58 @@ func cmdMetadata(c *cli.Context) error {
 	for _, e := range entries {
 		fmt.Printf("    → %s\n", cyan(filepath.Join(outputDir, e.Name())))
 	}
+
+	// Aperçu des variables (tableau)
+	fmt.Printf("\n  %s\n\n", bold("Aperçu des variables:"))
+	fmt.Printf("  %-25s %-15s %-30s\n", bold("Variable"), bold("Type"), bold("Instrument"))
+	fmt.Printf("  %s %s %s\n", strings.Repeat("─", 25), strings.Repeat("─", 15), strings.Repeat("─", 30))
+	maxVars := 10
+	if len(metadata) < maxVars {
+		maxVars = len(metadata)
+	}
+	for i := 0; i < maxVars; i++ {
+		v := metadata[i]
+		fmt.Printf("  %-25s %-15s %-30s\n",
+			truncateString(v.FieldName, 25),
+			v.FieldType,
+			truncateString(v.FormName, 30))
+	}
+	if len(metadata) > 10 {
+		fmt.Printf("  %s\n", color.HiBlackString("... et %d autres variables", len(metadata)-10))
+	}
+
+	// Résumé par instrument
+	fmt.Printf("\n  %s\n\n", bold("Résumé par instrument:"))
+	varsByInstrument := make(map[string]int)
+	typesByInstrument := make(map[string]map[string]int)
+	for _, v := range metadata {
+		varsByInstrument[v.FormName]++
+		if typesByInstrument[v.FormName] == nil {
+			typesByInstrument[v.FormName] = make(map[string]int)
+		}
+		typesByInstrument[v.FormName][v.FieldType]++
+	}
+
+	for _, inst := range instruments {
+		count := varsByInstrument[inst.Name]
+		types := typesByInstrument[inst.Name]
+
+		// Construire la liste des types
+		var typeList []string
+		for t, c := range types {
+			typeList = append(typeList, fmt.Sprintf("%s:%d", t, c))
+		}
+		sort.Strings(typeList)
+
+		fmt.Printf("    %s (%d variables)\n", cyan(inst.Label), count)
+		fmt.Printf("      Types: %s\n", strings.Join(typeList, ", "))
+	}
 	fmt.Println()
 
 	return nil
 }
 
-func cmdConsents(c *cli.Context) error {
+func cmdDiffusion(c *cli.Context) error {
 	apiURL, token, err := getConfig()
 	if err != nil {
 		return err
@@ -522,12 +712,12 @@ func cmdConsents(c *cli.Context) error {
 
 	t := newTask(
 		"Récupération des métadonnées",
-		"Identification des champs de consentement",
+		"Identification des champs de diffusion",
 		"Récupération des valeurs",
 		"Export CSV",
 	)
 
-	fmt.Printf("\n%s\n\n", bold("Récupération des consentements REDCap"))
+	fmt.Printf("\n%s\n\n", bold("Récupération des paramètres de diffusion REDCap"))
 	os.MkdirAll(outputDir, 0755)
 
 	// Step 1: Metadata
@@ -538,12 +728,12 @@ func cmdConsents(c *cli.Context) error {
 		return err
 	}
 
-	// Step 2: Find consent fields
+	// Step 2: Find diffusion fields
 	t.run(1)
-	consentFields := findConsentFields(metadata)
-	if len(consentFields) == 0 {
+	diffusionFields := findDiffusionFields(metadata)
+	if len(diffusionFields) == 0 {
 		t.fail()
-		fmt.Printf("\n%s Aucun champ de consentement trouvé (pattern: *_consent)\n\n", yellow("⚠"))
+		fmt.Printf("\n%s Aucun champ de diffusion trouvé (patterns: *_identification_level, *_audience)\n\n", yellow("⚠"))
 		return nil
 	}
 
@@ -551,7 +741,7 @@ func cmdConsents(c *cli.Context) error {
 	t.run(2)
 	recordIDField := metadata[0].FieldName
 	fieldNames := []string{recordIDField}
-	for _, f := range consentFields {
+	for _, f := range diffusionFields {
 		fieldNames = append(fieldNames, f.FieldName)
 	}
 
@@ -563,7 +753,7 @@ func cmdConsents(c *cli.Context) error {
 
 	// Step 4: Export CSV
 	t.run(3)
-	outPath := filepath.Join(outputDir, "consents.csv")
+	outPath := filepath.Join(outputDir, "diffusion.csv")
 	file, err := os.Create(outPath)
 	if err != nil {
 		t.fail()
@@ -590,12 +780,21 @@ func cmdConsents(c *cli.Context) error {
 
 	// Summary
 	fmt.Printf("\n%s Terminé!\n\n", green("✓"))
-	fmt.Printf("  %s %d champs de consentement trouvés:\n", bold("Consentements:"), len(consentFields))
-	for _, f := range consentFields {
+	fmt.Printf("  %s %d champs de diffusion trouvés:\n", bold("Diffusion:"), len(diffusionFields))
+	for _, f := range diffusionFields {
 		fmt.Printf("    • %s (%s)\n", cyan(f.FieldName), f.FormName)
 	}
 	fmt.Printf("\n  %s %d enregistrements\n", bold("Participants:"), len(records))
-	fmt.Printf("  %s %s\n\n", bold("Fichier:"), cyan(outPath))
+	fmt.Printf("  %s %s\n", bold("Fichier:"), cyan(outPath))
+
+	// Aperçu des données (tableau)
+	fmt.Printf("\n  %s\n\n", bold("Aperçu des données:"))
+	printRecordsTable(records, fieldNames, 5)
+
+	// Statistiques sur les champs de diffusion (sans l'ID)
+	statFields := fieldNames[1:]
+	printRecordsStats(records, statFields)
+	fmt.Println()
 
 	return nil
 }
@@ -675,6 +874,73 @@ func cmdClean(c *cli.Context) error {
 	return nil
 }
 
+type menuItem struct {
+	Name        string
+	Description string
+	Action      func() error
+}
+
+func runInteractiveMenu() error {
+	items := []menuItem{
+		{Name: "Métadonnées", Description: "Récupère les métadonnées complètes (instruments, variables)", Action: func() error { return cmdMetadata(nil) }},
+		{Name: "Instruments", Description: "Affiche la liste des instruments", Action: func() error { return cmdInstruments(nil) }},
+		{Name: "Export", Description: "Exporte les données en CSV", Action: func() error { return cmdExport(nil) }},
+		{Name: "Diffusion", Description: "Récupère les paramètres de diffusion", Action: func() error { return cmdDiffusion(nil) }},
+		{Name: "Rapport PDF", Description: "Compile le rapport Quarto en PDF", Action: func() error { return cmdRapportPDF(nil) }},
+		{Name: "Rapport HTML", Description: "Compile le rapport Quarto en HTML", Action: func() error { return cmdRapportHTML(nil) }},
+		{Name: "Preview", Description: "Lance le preview Quarto", Action: func() error { return cmdRapportPreview(nil) }},
+		{Name: "Nettoyage", Description: "Supprime les fichiers générés", Action: func() error { return cmdClean(nil) }},
+		{Name: "Quitter", Description: "Ferme le programme", Action: nil},
+	}
+
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}",
+		Active:   "▸ {{ .Name | cyan }} - {{ .Description }}",
+		Inactive: "  {{ .Name | white }} - {{ .Description | faint }}",
+		Selected: "{{ .Name | green | bold }}",
+	}
+
+	for {
+		fmt.Printf("\n%s\n", bold("═══════════════════════════════════════"))
+		fmt.Printf("  %s - Menu principal\n", bold("ECRIN"))
+		fmt.Printf("%s\n\n", bold("═══════════════════════════════════════"))
+
+		prompt := promptui.Select{
+			Label:     "Choisissez une action",
+			Items:     items,
+			Templates: templates,
+			Size:      len(items),
+		}
+
+		idx, _, err := prompt.Run()
+		if err != nil {
+			if err == promptui.ErrInterrupt {
+				fmt.Println("\nAu revoir!")
+				return nil
+			}
+			return err
+		}
+
+		selected := items[idx]
+		if selected.Action == nil {
+			fmt.Println("\nAu revoir!")
+			return nil
+		}
+
+		if err := selected.Action(); err != nil {
+			fmt.Fprintf(os.Stderr, "\n%s %v\n", color.RedString("Erreur:"), err)
+		}
+
+		fmt.Print("\nAppuyez sur Entrée pour continuer...")
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+
+		// Clear terminal
+		cmd := exec.Command("clear")
+		cmd.Stdout = os.Stdout
+		cmd.Run()
+	}
+}
+
 func main() {
 	loadEnv()
 
@@ -702,10 +968,10 @@ func main() {
 				Action:  cmdExport,
 			},
 			{
-				Name:    "consents",
-				Aliases: []string{"c"},
-				Usage:   "Récupère les champs de consentement (*_consent)",
-				Action:  cmdConsents,
+				Name:    "diffusion",
+				Aliases: []string{"d"},
+				Usage:   "Récupère les paramètres de diffusion (*_identification_level, *_audience)",
+				Action:  cmdDiffusion,
 			},
 			{
 				Name:    "rapport",
@@ -736,7 +1002,9 @@ func main() {
 				Action: cmdClean,
 			},
 		},
-		Action: cli.ShowAppHelp,
+		Action: func(c *cli.Context) error {
+			return runInteractiveMenu()
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {

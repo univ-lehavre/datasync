@@ -4,6 +4,9 @@
 # Données exportées (sensibles)
 data/
 
+# Rapports générés
+reports/
+
 # Build
 bin/
 
@@ -21,3 +24,4 @@ bin/
 .DS_Store
 rapport-analyse-premiere-vague.qmd
 .Rhistory
+ecrin

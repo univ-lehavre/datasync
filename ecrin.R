@@ -3,12 +3,10 @@
 #
 # Usage:
 #   Rscript ecrin.R              # Lance le menu interactif
-#   Rscript ecrin.R metadata     # Récupère les métadonnées REDCap
-#   Rscript ecrin.R instruments  # Affiche la liste des instruments
+#   Rscript ecrin.R metadata     # Récupère instruments + métadonnées + dictionnaire.csv
 #   Rscript ecrin.R export       # Exporte les données en CSV
 #   Rscript ecrin.R diffusion    # Récupère les paramètres de diffusion
-#   Rscript ecrin.R rapport dictionnaire  # Génère le dictionnaire des données (CSV)
-#   Rscript ecrin.R rapport profils       # Génère le rapport des profils
+#   Rscript ecrin.R rapport profils  # Génère le rapport des profils
 #   Rscript ecrin.R clean        # Supprime les fichiers générés
 
 script_dir <- local({
@@ -27,26 +25,6 @@ source(file.path(script_dir, "R/display.R"))
 # ---------------------------------------------------------------------------
 # Commandes CLI
 # ---------------------------------------------------------------------------
-
-cmd_instruments <- function() {
-  cfg <- get_config()
-  cat("\n")
-  cat("  Récupération des instruments...\n")
-  instruments <- get_instruments(cfg$api_url, cfg$token)
-  cat(str_green("  \u2713 "), "Instruments récupérés\n", sep = "")
-
-  cat(sprintf("\n%d instruments trouvés\n\n", nrow(instruments)))
-  cat(sprintf("%-30s %s\n", str_bold("Nom technique"), str_bold("Label")))
-  cat(strrep("\u2500", 70), "\n", sep = "")
-  for (i in seq_len(nrow(instruments))) {
-    cat(sprintf(
-      "%-30s %s\n",
-      str_cyan(instruments$instrument_name[i]),
-      instruments$instrument_label[i]
-    ))
-  }
-  cat("\n")
-}
 
 cmd_export <- function() {
   cfg <- get_config()
@@ -107,33 +85,14 @@ cmd_metadata <- function() {
   )
   cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
 
-  cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
-  cat(sprintf("  %s %d instruments\n", str_bold("Instruments:"), nrow(instruments)))
-  cat(sprintf("  %s %d variables\n\n", str_bold("Variables:"), nrow(metadata)))
-  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "instruments.json"))))
-  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(DATA_DIR, "metadata.json"))))
-}
-
-cmd_rapport_variables <- function() {
-  instruments_path <- file.path(DATA_DIR, "instruments.json")
-  metadata_path <- file.path(DATA_DIR, "metadata.json")
-
-  if (!file.exists(instruments_path) || !file.exists(metadata_path)) {
-    cat(sprintf("\n%s Métadonnées absentes. Lancez d'abord 'Métadonnées'.\n\n", str_yellow("\u26a0")))
-    return(invisible(NULL))
-  }
-
-  cat(sprintf("\n%s\n\n", str_bold("Génération du dictionnaire des données")))
-  dir_create(DATA_DIR, recurse = TRUE)
-
-  instruments <- fromJSON(instruments_path, simplifyDataFrame = TRUE)
-  metadata <- fromJSON(metadata_path, simplifyDataFrame = TRUE)
-
-  cat("  Génération du dictionnaire des données...\n")
+  cat("  Génération du dictionnaire CSV...\n")
   generate_variables_csv(metadata, file.path(DATA_DIR, "dictionnaire.csv"))
   cat(str_green("  \u2713 "), "Dictionnaire généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
+  cat(sprintf("  %s %d instruments, %d variables\n\n", str_bold("REDCap:"), nrow(instruments), nrow(metadata)))
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "instruments.json"))))
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "metadata.json"))))
   cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(DATA_DIR, "dictionnaire.csv"))))
 }
 
@@ -374,12 +333,7 @@ cmd_clean <- function() {
 # ---------------------------------------------------------------------------
 run_interactive_menu <- function() {
   items <- list(
-    list(name = "Métadonnées", desc = "Récupère instruments + dictionnaire REDCap", action = cmd_metadata),
-    list(name = "Instruments", desc = "Affiche la liste des instruments", action = cmd_instruments),
-    list(
-      name = "Dictionnaire des données", desc = "Génère dictionnaire.csv",
-      action = cmd_rapport_variables
-    ),
+    list(name = "Métadonnées", desc = "Récupère instruments + métadonnées + dictionnaire.csv", action = cmd_metadata),
     list(name = "Export", desc = "Exporte les données en CSV", action = cmd_export),
     list(name = "Diffusion", desc = "Récupère les paramètres de diffusion", action = cmd_diffusion),
     list(
@@ -453,8 +407,6 @@ main <- function() {
       switch(cmd,
         "metadata" = ,
         "m" = cmd_metadata(),
-        "instruments" = ,
-        "i" = cmd_instruments(),
         "export" = ,
         "e" = cmd_export(),
         "diffusion" = ,
@@ -463,22 +415,20 @@ main <- function() {
         "r" = {
           sub_cmd <- if (length(args) >= 2) tolower(args[2]) else "pdf"
           switch(sub_cmd,
-            "dictionnaire" = ,
-            "variables" = cmd_rapport_variables(),
             "profils" = cmd_rapport_profils(),
             "pdf" = cmd_rapport_pdf(),
             "html" = cmd_rapport_html(),
             "preview" = cmd_rapport_preview(),
             {
               cat(sprintf("Sous-commande rapport inconnue: %s\n", sub_cmd))
-              cat("Sous-commandes disponibles: dictionnaire, profils, pdf, html, preview\n")
+              cat("Sous-commandes disponibles: profils, pdf, html, preview\n")
             }
           )
         },
         "clean" = cmd_clean(),
         {
           cat(sprintf("Commande inconnue: %s\n", cmd))
-          cat("Commandes: metadata, instruments, export, diffusion, rapport [profils|pdf|html|preview], clean\n")
+          cat("Commandes: metadata, export, diffusion, rapport [profils|pdf|html|preview], clean\n")
           cat("Sans argument : lance le menu interactif\n")
           quit(status = 1)
         }

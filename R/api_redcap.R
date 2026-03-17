@@ -39,9 +39,11 @@ get_metadata <- function(api_url, token) {
   body <- redcap_request(api_url, token, "metadata")
   df <- fromJSON(body, simplifyDataFrame = TRUE)
   # Normaliser les colonnes attendues
-  needed <- c("form_name", "field_name", "field_label", "field_type",
-              "select_choices_or_calculations", "required_field",
-              "branching_logic", "identifier")
+  needed <- c(
+    "form_name", "field_name", "field_label", "field_type",
+    "select_choices_or_calculations", "required_field",
+    "branching_logic", "identifier"
+  )
   for (col in needed) {
     if (!col %in% names(df)) df[[col]] <- ""
   }
@@ -56,7 +58,9 @@ hash_id <- function(id) {
 }
 
 hash_record_ids <- function(records, id_field) {
-  if (is.null(records) || nrow(records) == 0) return(records)
+  if (is.null(records) || nrow(records) == 0) {
+    return(records)
+  }
   records[["_original_id"]] <- as.character(records[[id_field]])
   records[[id_field]] <- vapply(records[[id_field]], function(v) hash_id(as.character(v)), character(1))
   records
@@ -68,15 +72,19 @@ hash_record_ids <- function(records, id_field) {
 get_records <- function(api_url, token, id_field) {
   body <- redcap_request(api_url, token, "record", list(rawOrLabel = "label"))
   records <- fromJSON(body, simplifyDataFrame = TRUE)
-  if (is.null(records) || (is.data.frame(records) && nrow(records) == 0)) return(records)
+  if (is.null(records) || (is.data.frame(records) && nrow(records) == 0)) {
+    return(records)
+  }
   hash_record_ids(records, id_field)
 }
 
 get_records_with_fields_opts <- function(api_url, token, fields, hash_ids = TRUE) {
   extra <- list(rawOrLabel = "label", fields = paste(fields, collapse = ","))
-  body  <- redcap_request(api_url, token, "record", extra)
+  body <- redcap_request(api_url, token, "record", extra)
   records <- fromJSON(body, simplifyDataFrame = TRUE)
-  if (is.null(records) || (is.data.frame(records) && nrow(records) == 0)) return(records)
+  if (is.null(records) || (is.data.frame(records) && nrow(records) == 0)) {
+    return(records)
+  }
   if (hash_ids && length(fields) > 0) {
     records <- hash_record_ids(records, fields[1])
   }
@@ -98,8 +106,8 @@ get_records_with_fields_and_ids <- function(api_url, token, fields, record_ids) 
     format     = "json",
     type       = "flat",
     rawOrLabel = "label",
-    fields     = paste(fields,      collapse = ","),
-    records    = paste(record_ids,  collapse = ",")
+    fields     = paste(fields, collapse = ","),
+    records    = paste(record_ids, collapse = ",")
   )
   resp <- tryCatch(
     request(api_url) |>

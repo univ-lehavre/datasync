@@ -283,11 +283,24 @@ def compute_diff(cfg: dict, api_cfg: dict, audience: str) -> list[dict]:
     redcap_state = load_redcap_state()
 
     metadata_path = Path("downloads/metadata/metadata.json")
-    if not metadata_path.exists():
-        console.print("[yellow]Métadonnées absentes, téléchargement...[/yellow]")
-        run_r_task("fetch_metadata.R", api_cfg)
-
     instruments_path = Path("downloads/metadata/instruments.json")
+
+    # Toujours télécharger les métadonnées, mais ne signaler le changement que si le SHA-256 diffère
+    old_hashes = {
+        "metadata.json": redcap_state.get("_metadata", {}).get("metadata.json", ""),
+        "instruments.json": redcap_state.get("_metadata", {}).get("instruments.json", ""),
+    }
+    run_r_task("fetch_metadata.R", api_cfg)
+    new_hashes = {
+        "metadata.json": sha256_file(metadata_path) if metadata_path.exists() else "",
+        "instruments.json": sha256_file(instruments_path) if instruments_path.exists() else "",
+    }
+    if new_hashes != old_hashes:
+        redcap_state["_metadata"] = {"metadata.json": new_hashes["metadata.json"],
+                                     "instruments.json": new_hashes["instruments.json"]}
+        save_redcap_state(redcap_state)
+        if any(old_hashes.values()):
+            console.print("  [yellow]~[/yellow] Métadonnées REDCap modifiées — structure mise à jour")
     with instruments_path.open() as f:
         all_instruments = json.load(f)
     with metadata_path.open() as f:
@@ -557,11 +570,6 @@ def preview() -> None:
     console.print(f"\n[bold]Previewing updates for stack[/bold] [cyan]{name}[/cyan] "
                   f"(audience : {audience})\n")
 
-    metadata_path = Path("downloads/metadata/metadata.json")
-    if not metadata_path.exists():
-        console.print("  Récupération des métadonnées REDCap...")
-        run_r_task("fetch_metadata.R", api_cfg)
-
     diff = compute_diff(cfg, api_cfg, audience)
 
     if not diff:
@@ -620,13 +628,8 @@ def up() -> None:
 
     console.print(f"\n[bold]Updating stack[/bold] [cyan]{name}[/cyan] (audience : {audience})\n")
 
-    metadata_path = Path("downloads/metadata/metadata.json")
-    if not metadata_path.exists():
-        console.print("  Récupération des métadonnées REDCap...")
-        run_r_task("fetch_metadata.R", api_cfg)
-        console.print("  [green]✓[/green] Métadonnées récupérées")
-
     diff = compute_diff(cfg, api_cfg, audience)
+    metadata_path = Path("downloads/metadata/metadata.json")
 
     if not diff:
         console.print("[yellow]Aucun instrument détecté.[/yellow]")

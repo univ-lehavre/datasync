@@ -130,11 +130,11 @@ cmd_rapport_variables <- function() {
   metadata <- fromJSON(metadata_path, simplifyDataFrame = TRUE)
 
   cat("  Génération du dictionnaire des données...\n")
-  generate_variables_csv(metadata, file.path(REPORTS_DIR, "variables_recap.csv"))
+  generate_variables_csv(metadata, file.path(REPORTS_DIR, "dictionnaire.csv"))
   cat(str_green("  \u2713 "), "Dictionnaire généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
-  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "variables_recap.csv"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "dictionnaire.csv"))))
 }
 
 cmd_diffusion <- function() {
@@ -377,7 +377,7 @@ run_interactive_menu <- function() {
     list(name = "Métadonnées", desc = "Récupère instruments + dictionnaire REDCap", action = cmd_metadata),
     list(name = "Instruments", desc = "Affiche la liste des instruments", action = cmd_instruments),
     list(
-      name = "Dictionnaire des données", desc = "Génère variables_recap.csv",
+      name = "Dictionnaire des données", desc = "Génère dictionnaire.csv",
       action = cmd_rapport_variables
     ),
     list(name = "Export", desc = "Exporte les données en CSV", action = cmd_export),

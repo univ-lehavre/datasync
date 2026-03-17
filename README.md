@@ -45,7 +45,7 @@ Les fichiers sont répartis dans deux dossiers :
 
 **`reports/`** - Fichiers générés :
 
-- `variables_recap.csv` - Dictionnaire des données (CSV)
+- `dictionnaire.csv` - Dictionnaire des données (CSV)
 
 ### Rapport Quarto
 

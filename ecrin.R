@@ -7,7 +7,8 @@
 #   Rscript ecrin.R instruments  # Affiche la liste des instruments
 #   Rscript ecrin.R export       # Exporte les données en CSV
 #   Rscript ecrin.R diffusion    # Récupère les paramètres de diffusion
-#   Rscript ecrin.R rapport profils  # Génère le rapport des profils
+#   Rscript ecrin.R rapport dictionnaire  # Génère le dictionnaire des données (CSV)
+#   Rscript ecrin.R rapport profils       # Génère le rapport des profils
 #   Rscript ecrin.R clean        # Supprime les fichiers générés
 
 script_dir <- local({
@@ -122,23 +123,18 @@ cmd_rapport_variables <- function() {
     return(invisible(NULL))
   }
 
-  cat(sprintf("\n%s\n\n", str_bold("Génération du rapport des variables")))
+  cat(sprintf("\n%s\n\n", str_bold("Génération du dictionnaire des données")))
   dir_create(REPORTS_DIR, recurse = TRUE)
 
   instruments <- fromJSON(instruments_path, simplifyDataFrame = TRUE)
   metadata <- fromJSON(metadata_path, simplifyDataFrame = TRUE)
 
-  cat("  Génération du CSV récapitulatif...\n")
+  cat("  Génération du dictionnaire des données...\n")
   generate_variables_csv(metadata, file.path(REPORTS_DIR, "variables_recap.csv"))
-  cat(str_green("  \u2713 "), "CSV généré\n", sep = "")
-
-  cat("  Génération du rapport texte...\n")
-  generate_report(instruments, metadata, file.path(REPORTS_DIR, "rapport_variables.txt"))
-  cat(str_green("  \u2713 "), "Rapport généré\n", sep = "")
+  cat(str_green("  \u2713 "), "Dictionnaire généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
-  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(REPORTS_DIR, "variables_recap.csv"))))
-  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "rapport_variables.txt"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "variables_recap.csv"))))
 }
 
 cmd_diffusion <- function() {
@@ -381,7 +377,7 @@ run_interactive_menu <- function() {
     list(name = "Métadonnées", desc = "Récupère instruments + dictionnaire REDCap", action = cmd_metadata),
     list(name = "Instruments", desc = "Affiche la liste des instruments", action = cmd_instruments),
     list(
-      name = "Rapport variables", desc = "Génère variables_recap.csv + rapport_variables.txt",
+      name = "Dictionnaire des données", desc = "Génère variables_recap.csv",
       action = cmd_rapport_variables
     ),
     list(name = "Export", desc = "Exporte les données en CSV", action = cmd_export),
@@ -467,6 +463,7 @@ main <- function() {
         "r" = {
           sub_cmd <- if (length(args) >= 2) tolower(args[2]) else "pdf"
           switch(sub_cmd,
+            "dictionnaire" = ,
             "variables" = cmd_rapport_variables(),
             "profils" = cmd_rapport_profils(),
             "pdf" = cmd_rapport_pdf(),
@@ -474,7 +471,7 @@ main <- function() {
             "preview" = cmd_rapport_preview(),
             {
               cat(sprintf("Sous-commande rapport inconnue: %s\n", sub_cmd))
-              cat("Sous-commandes disponibles: variables, profils, pdf, html, preview\n")
+              cat("Sous-commandes disponibles: dictionnaire, profils, pdf, html, preview\n")
             }
           )
         },

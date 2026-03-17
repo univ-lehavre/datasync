@@ -27,7 +27,7 @@ generate_report <- function(instruments, metadata, filepath) {
   }
 
   add(strrep("=", 60))
-  add("RAPPORT DES VARIABLES REDCAP")
+  add("DICTIONNAIRE DES DONNEES REDCAP")
   add("Généré le ", format(Sys.time(), "%Y-%m-%d %H:%M"))
   add(strrep("=", 60))
   add("")

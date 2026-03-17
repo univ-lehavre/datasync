@@ -45,13 +45,13 @@ Les fichiers sont répartis dans deux dossiers :
 
 **`reports/`** - Fichiers générés :
 
-- `variables_recap.csv` - Récapitulatif des variables
-- `rapport_variables.txt` - Rapport textuel des variables
+- `variables_recap.csv` - Dictionnaire des données (CSV)
 
 ### Rapport Quarto
 
 | Commande                               | Description                               |
 | -------------------------------------- | ----------------------------------------- |
+| `Rscript ecrin.R rapport dictionnaire` | Génère le dictionnaire des données (CSV)  |
 | `Rscript ecrin.R rapport profils`      | Génère le rapport des profils (avec audience) |
 | `Rscript ecrin.R rapport pdf`          | Compile le rapport Quarto en PDF          |
 | `Rscript ecrin.R rapport html`         | Compile le rapport Quarto en HTML         |

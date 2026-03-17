@@ -4,7 +4,7 @@
 # Usage:
 #   Rscript ecrin.R              # Lance le menu interactif
 #   Rscript ecrin.R metadata     # Récupère instruments + métadonnées + dictionnaire.csv
-#   Rscript ecrin.R export       # Exporte les données en CSV
+#   Rscript ecrin.R export       # Télécharge toutes les données en CSV
 #   Rscript ecrin.R diffusion    # Récupère les paramètres de diffusion
 #   Rscript ecrin.R rapport profils  # Génère le rapport des profils
 #   Rscript ecrin.R clean        # Supprime les fichiers générés
@@ -28,7 +28,7 @@ source(file.path(script_dir, "R/display.R"))
 
 cmd_export <- function() {
   cfg <- get_config()
-  cat(sprintf("\n%s\n\n", str_bold("Export des données REDCap")))
+  cat(sprintf("\n%s\n\n", str_bold("Téléchargement des données REDCap")))
   dir_create(DATA_DIR, recurse = TRUE)
 
   cat("  Récupération des métadonnées...\n")
@@ -41,7 +41,7 @@ cmd_export <- function() {
   cat(str_green("  \u2713 "), "Enregistrements récupérés\n", sep = "")
 
   if (is.null(records) || nrow(records) == 0) {
-    cat(sprintf("\n%s Aucune donnée à exporter.\n\n", str_yellow("\u26a0")))
+    cat(sprintf("\n%s Aucune donnée à télécharger.\n\n", str_yellow("\u26a0")))
     return(invisible(NULL))
   }
 
@@ -53,7 +53,7 @@ cmd_export <- function() {
   cat(str_green("  \u2713 "), "Export CSV terminé\n", sep = "")
 
   cat(sprintf(
-    "\n%s %s enregistrements exportés\n",
+    "\n%s %s enregistrements téléchargés\n",
     str_green("\u2713"), str_bold(as.character(nrow(records)))
   ))
   cat(sprintf("  \u2192 %s\n\n", str_cyan(out_path)))
@@ -67,13 +67,13 @@ cmd_metadata <- function() {
   cfg <- get_config()
   cat(sprintf("\n%s\n", str_bold("Récupération des métadonnées REDCap")))
   cat(sprintf("  URL: %s\n\n", str_cyan(cfg$api_url)))
-  dir_create(DATA_DIR, recurse = TRUE)
+  dir_create(METADATA_DIR, recurse = TRUE)
 
   cat("  Récupération des instruments...\n")
   instruments <- get_instruments(cfg$api_url, cfg$token)
   write(
     toJSON(instruments, pretty = TRUE, auto_unbox = TRUE),
-    file.path(DATA_DIR, "instruments.json")
+    file.path(METADATA_DIR, "instruments.json")
   )
   cat(str_green("  \u2713 "), "Instruments récupérés\n", sep = "")
 
@@ -81,19 +81,19 @@ cmd_metadata <- function() {
   metadata <- get_metadata(cfg$api_url, cfg$token)
   write(
     toJSON(metadata, pretty = TRUE, auto_unbox = TRUE),
-    file.path(DATA_DIR, "metadata.json")
+    file.path(METADATA_DIR, "metadata.json")
   )
   cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
 
   cat("  Génération du dictionnaire CSV...\n")
-  generate_variables_csv(metadata, file.path(DATA_DIR, "dictionnaire.csv"))
+  generate_variables_csv(metadata, file.path(METADATA_DIR, "dictionnaire.csv"))
   cat(str_green("  \u2713 "), "Dictionnaire généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
   cat(sprintf("  %s %d instruments, %d variables\n\n", str_bold("REDCap:"), nrow(instruments), nrow(metadata)))
-  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "instruments.json"))))
-  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "metadata.json"))))
-  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(DATA_DIR, "dictionnaire.csv"))))
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(METADATA_DIR, "instruments.json"))))
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(METADATA_DIR, "metadata.json"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(METADATA_DIR, "dictionnaire.csv"))))
 }
 
 cmd_diffusion <- function() {
@@ -299,7 +299,7 @@ cmd_clean <- function() {
   cat(sprintf("\n%s\n\n", str_bold("Nettoyage des fichiers générés")))
 
   patterns <- list(
-    list(path = DATA_DIR, is_dir = TRUE),
+    list(path = DOWNLOADS_DIR, is_dir = TRUE),
     list(path = REPORTS_DIR, is_dir = TRUE)
   )
 
@@ -334,7 +334,7 @@ cmd_clean <- function() {
 run_interactive_menu <- function() {
   items <- list(
     list(name = "Métadonnées", desc = "Récupère instruments + métadonnées + dictionnaire.csv", action = cmd_metadata),
-    list(name = "Export", desc = "Exporte les données en CSV", action = cmd_export),
+    list(name = "Téléchargements", desc = "Télécharge toutes les données en CSV", action = cmd_export),
     list(name = "Diffusion", desc = "Récupère les paramètres de diffusion", action = cmd_diffusion),
     list(
       name = "Rapport Profils", desc = "Génère le rapport des profils chercheurs (PDF)",

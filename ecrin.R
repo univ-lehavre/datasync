@@ -396,6 +396,7 @@ main <- function() {
   args <- commandArgs(trailingOnly = TRUE)
 
   if (length(args) == 0) {
+    system("clear")
     run_interactive_menu()
     return(invisible(NULL))
   }

@@ -28,7 +28,11 @@ download_file_redcap <- function(api_url, token, record_id, field_name, dest_pat
     message(sprintf("Erreur API fichier (status %d)", resp_status(resp)))
     return(invisible(FALSE))
   }
-  writeBin(resp_body_raw(resp), dest_path)
+  raw_body <- tryCatch(resp_body_raw(resp), error = function(e) raw(0))
+  if (length(raw_body) == 0L) {
+    return(invisible(FALSE))
+  }
+  writeBin(raw_body, dest_path)
   invisible(TRUE)
 }
 

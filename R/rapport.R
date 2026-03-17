@@ -151,7 +151,7 @@ generate_instrument_section <- function(result, metadata, section_index) {
   add("#| label: stats-", prefix)
   add("#| results: asis")
   add("")
-  dl <- "../telechargements"
+  dl <- "../downloads"
   tpl_csv <- "show_col_types = FALSE), error = function(e) tibble())"
   add("ident_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague2_", name, "_identifiables.csv\", ", tpl_csv)
   add("pseudo_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague3_", name, "_pseudonymises.csv\", ", tpl_csv)

@@ -124,17 +124,17 @@ cmd_rapport_variables <- function() {
   }
 
   cat(sprintf("\n%s\n\n", str_bold("Génération du dictionnaire des données")))
-  dir_create(REPORTS_DIR, recurse = TRUE)
+  dir_create(DATA_DIR, recurse = TRUE)
 
   instruments <- fromJSON(instruments_path, simplifyDataFrame = TRUE)
   metadata <- fromJSON(metadata_path, simplifyDataFrame = TRUE)
 
   cat("  Génération du dictionnaire des données...\n")
-  generate_variables_csv(metadata, file.path(REPORTS_DIR, "dictionnaire.csv"))
+  generate_variables_csv(metadata, file.path(DATA_DIR, "dictionnaire.csv"))
   cat(str_green("  \u2713 "), "Dictionnaire généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
-  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "dictionnaire.csv"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(DATA_DIR, "dictionnaire.csv"))))
 }
 
 cmd_diffusion <- function() {

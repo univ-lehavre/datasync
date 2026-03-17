@@ -42,10 +42,8 @@ Les fichiers sont répartis dans deux dossiers :
 
 - `instruments.json` - Liste des instruments
 - `metadata.json` - Métadonnées complètes
+- `dictionnaire.csv` - Dictionnaire des données
 
-**`reports/`** - Fichiers générés :
-
-- `dictionnaire.csv` - Dictionnaire des données (CSV)
 
 ### Rapport Quarto
 

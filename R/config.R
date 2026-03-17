@@ -13,7 +13,7 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------------
 # Constantes
 # ---------------------------------------------------------------------------
-DATA_DIR <- "data"
+DATA_DIR <- "telechargements"
 REPORTS_DIR <- "reports"
 RAPPORT_QMD <- "rapport-analyse-premiere-vague.qmd"
 

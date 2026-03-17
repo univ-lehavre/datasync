@@ -151,12 +151,13 @@ generate_instrument_section <- function(result, metadata, section_index) {
   add("#| label: stats-", prefix)
   add("#| results: asis")
   add("")
+  dl <- "../telechargements"
   tpl_csv <- "show_col_types = FALSE), error = function(e) tibble())"
-  add("ident_", prefix, " <- tryCatch(read_csv(\"../data/vague2_", name, "_identifiables.csv\", ", tpl_csv)
-  add("pseudo_", prefix, " <- tryCatch(read_csv(\"../data/vague3_", name, "_pseudonymises.csv\", ", tpl_csv)
-  add("anon_", prefix, " <- tryCatch(read_csv(\"../data/vague4_", name, "_anonymises.csv\", ", tpl_csv)
+  add("ident_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague2_", name, "_identifiables.csv\", ", tpl_csv)
+  add("pseudo_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague3_", name, "_pseudonymises.csv\", ", tpl_csv)
+  add("anon_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague4_", name, "_anonymises.csv\", ", tpl_csv)
   tpl_csv_stats <- "show_col_types = FALSE), error = function(e) tibble(categorie = character(), nombre = integer()))"
-  add("stats_", prefix, " <- tryCatch(read_csv(\"../data/vague5_", name, "_statistiques.csv\", ", tpl_csv_stats)
+  add("stats_", prefix, " <- tryCatch(read_csv(\"", dl, "/vague5_", name, "_statistiques.csv\", ", tpl_csv_stats)
   add("")
   add(sprintf("n_ident <- nrow(ident_%s)", prefix))
   add(sprintf("n_pseudo <- nrow(pseudo_%s)", prefix))

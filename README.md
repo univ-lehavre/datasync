@@ -38,7 +38,7 @@ Rscript ecrin.R
 
 Les fichiers sont répartis dans deux dossiers :
 
-**`data/`** - Données téléchargées depuis REDCap :
+**`telechargements/`** - Données téléchargées depuis REDCap :
 
 - `instruments.json` - Liste des instruments
 - `metadata.json` - Métadonnées complètes
@@ -143,9 +143,9 @@ Vague 1 : Champs de contrôle
 
 ### Structure des fichiers générés
 
-Les deux répertoires `data/` et `reports/` sont nettoyés avant chaque génération de rapport.
+Les deux répertoires `telechargements/` et `reports/` sont nettoyés avant chaque génération de rapport.
 
-**`data/`** - Données téléchargées depuis REDCap :
+**`telechargements/`** - Données téléchargées depuis REDCap :
 
 | Fichier                                 | Contenu                                                |
 | --------------------------------------- | ------------------------------------------------------ |

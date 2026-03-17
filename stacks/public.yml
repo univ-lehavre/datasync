@@ -1,0 +1,8 @@
+rapport:
+  titre: "Rapport ECRIN — Première vague"
+  audience: "public"
+  format:
+    - pdf
+  output: "reports/rapport-ecrin-public.pdf"
+
+instruments: auto

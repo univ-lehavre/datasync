@@ -4,7 +4,7 @@
 # Usage:
 #   Rscript ecrin.R              # Lance le menu interactif
 #   Rscript ecrin.R metadata     # Récupère instruments + métadonnées + dictionnaire.csv
-#   Rscript ecrin.R export       # Télécharge toutes les données en CSV
+#   Rscript ecrin.R export       # Pipeline complet par vagues (sans rapport)
 #   Rscript ecrin.R diffusion    # Récupère les paramètres de diffusion
 #   Rscript ecrin.R rapport profils  # Génère le rapport des profils
 #   Rscript ecrin.R clean        # Supprime les fichiers générés
@@ -26,41 +26,82 @@ source(file.path(script_dir, "R/display.R"))
 # Commandes CLI
 # ---------------------------------------------------------------------------
 
-cmd_export <- function() {
-  cfg <- get_config()
-  cat(sprintf("\n%s\n\n", str_bold("Téléchargement des données REDCap")))
+download_pipeline <- function(cfg, audience) {
   dir_create(DATA_DIR, recurse = TRUE)
 
+  # 0. Nettoyage
+  cat("  Nettoyage des données précédentes...\n")
+  clean_output_dir()
+  cat(str_green("  \u2713 "), "Nettoyage terminé\n", sep = "")
+
+  # 1. Métadonnées et instruments
   cat("  Récupération des métadonnées...\n")
+  instruments <- get_instruments(cfg$api_url, cfg$token)
   metadata <- get_metadata(cfg$api_url, cfg$token)
-  cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
   id_field <- metadata$field_name[1]
+  cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
 
-  cat("  Récupération des enregistrements...\n")
-  records <- get_records(cfg$api_url, cfg$token, id_field)
-  cat(str_green("  \u2713 "), "Enregistrements récupérés\n", sep = "")
+  # 2. Détecter les instruments avec diffusion
+  cat("  Détection des instruments...\n")
+  configs <- build_instrument_configs(instruments, metadata)
+  if (length(configs) == 0) {
+    cat(sprintf("\n%s Aucun instrument avec diffusion trouvé.\n\n", str_yellow("\u26a0")))
+    return(invisible(NULL))
+  }
+  for (cfg_item in configs) {
+    extra <- character(0)
+    if (cfg_item$has_identifiers) extra <- c(extra, "avec champs identifiants")
+    if (length(cfg_item$file_fields) > 0) {
+      extra <- c(extra, sprintf("fichiers: %s", paste(cfg_item$file_fields, collapse = ", ")))
+    }
+    extra_str <- if (length(extra) > 0) sprintf(" (%s)", paste(extra, collapse = ", ")) else ""
+    cat(str_green("  \u2713 "), cfg_item$label, extra_str, "\n", sep = "")
+  }
 
-  if (is.null(records) || nrow(records) == 0) {
-    cat(sprintf("\n%s Aucune donnée à télécharger.\n\n", str_yellow("\u26a0")))
+  # 3. Télécharger les données par instrument
+  cat("  Téléchargement des données par instrument...\n")
+  results <- list()
+  for (cfg_item in configs) {
+    result <- download_instrument_data(cfg$api_url, cfg$token, metadata, id_field, audience, cfg_item)
+    n_total <-
+      (if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L) +
+      (if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) else 0L) +
+      (if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L) +
+      result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
+    n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
+    stats_str <- if (n_stats > 0) sprintf(" (dont %d en statistiques seules)", n_stats) else ""
+    cat(str_green("  \u2713 "), cfg_item$label, ": ", n_total, " enregistrements", stats_str, "\n", sep = "")
+    results[[length(results) + 1]] <- result
+  }
+
+  # 4. Télécharger les fichiers pour les identifiables
+  cat("  Téléchargement des fichiers...\n")
+  for (i in seq_along(results)) {
+    r <- results[[i]]
+    if (length(r$config$file_fields) > 0 && !is.null(r$ident_records) && nrow(r$ident_records) > 0) {
+      files <- download_instrument_files(cfg$api_url, cfg$token, r$ident_records, id_field, r$config)
+      results[[i]]$files <- files
+      cat(str_green("  \u2713 "), r$config$label, ": ", length(files), " fichiers téléchargés\n", sep = "")
+    }
+  }
+
+  list(metadata = metadata, results = results)
+}
+
+cmd_export <- function() {
+  cfg <- get_config()
+  cat(sprintf("\n%s\n\n", str_bold("Téléchargements REDCap")))
+
+  audience <- select_audience()
+  cat(sprintf("\n  Audience sélectionnée: %s\n\n", str_cyan(audience)))
+
+  pipeline <- download_pipeline(cfg, audience)
+  if (is.null(pipeline)) {
     return(invisible(NULL))
   }
 
-  cat("  Export CSV...\n")
-  keys <- sort(names(records))
-  timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M")
-  out_path <- file.path(DATA_DIR, sprintf("data_export_%s.csv", timestamp))
-  write_csv(records[, keys], out_path)
-  cat(str_green("  \u2713 "), "Export CSV terminé\n", sep = "")
-
-  cat(sprintf(
-    "\n%s %s enregistrements téléchargés\n",
-    str_green("\u2713"), str_bold(as.character(nrow(records)))
-  ))
-  cat(sprintf("  \u2192 %s\n\n", str_cyan(out_path)))
-
-  cat(sprintf("  %s\n\n", str_bold("Aperçu des données:")))
-  preview_cols <- keys[seq_len(min(6L, length(keys)))]
-  print_records_table(records, preview_cols, max_rows = 5)
+  cat(sprintf("\n%s Téléchargements terminés!\n", str_green("\u2713")))
+  cat(sprintf("  \u2192 %s\n\n", str_cyan(DATA_DIR)))
 }
 
 cmd_metadata <- function() {
@@ -213,64 +254,15 @@ cmd_rapport_profils <- function() {
   audience <- select_audience()
   cat(sprintf("\n  Audience sélectionnée: %s\n\n", str_cyan(audience)))
 
-  dir_create(DATA_DIR, recurse = TRUE)
   dir_create(REPORTS_DIR, recurse = TRUE)
 
-  # 0. Nettoyage
-  cat("  Nettoyage des données précédentes...\n")
-  clean_output_dir()
-  cat(str_green("  \u2713 "), "Nettoyage terminé\n", sep = "")
-
-  # 1. Métadonnées et instruments
-  cat("  Récupération des métadonnées...\n")
-  instruments <- get_instruments(cfg$api_url, cfg$token)
-  metadata <- get_metadata(cfg$api_url, cfg$token)
-  id_field <- metadata$field_name[1]
-  cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
-
-  # 2. Détecter les instruments avec diffusion
-  cat("  Détection des instruments...\n")
-  configs <- build_instrument_configs(instruments, metadata)
-  if (length(configs) == 0) {
-    cat(sprintf("\n%s Aucun instrument avec diffusion trouvé.\n\n", str_yellow("\u26a0")))
+  pipeline <- download_pipeline(cfg, audience)
+  if (is.null(pipeline)) {
     return(invisible(NULL))
   }
-  for (cfg_item in configs) {
-    extra <- character(0)
-    if (cfg_item$has_identifiers) extra <- c(extra, "avec champs identifiants")
-    if (length(cfg_item$file_fields) > 0) {
-      extra <- c(extra, sprintf("fichiers: %s", paste(cfg_item$file_fields, collapse = ", ")))
-    }
-    extra_str <- if (length(extra) > 0) sprintf(" (%s)", paste(extra, collapse = ", ")) else ""
-    cat(str_green("  \u2713 "), cfg_item$label, extra_str, "\n", sep = "")
-  }
 
-  # 3. Télécharger les données par instrument
-  cat("  Téléchargement des données par instrument...\n")
-  results <- list()
-  for (cfg_item in configs) {
-    result <- download_instrument_data(cfg$api_url, cfg$token, metadata, id_field, audience, cfg_item)
-    n_total <-
-      (if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L) +
-      (if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) else 0L) +
-      (if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L) +
-      result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
-    n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
-    stats_str <- if (n_stats > 0) sprintf(" (dont %d en statistiques seules)", n_stats) else ""
-    cat(str_green("  \u2713 "), cfg_item$label, ": ", n_total, " enregistrements", stats_str, "\n", sep = "")
-    results[[length(results) + 1]] <- result
-  }
-
-  # 4. Télécharger les fichiers pour les identifiables
-  cat("  Téléchargement des fichiers...\n")
-  for (i in seq_along(results)) {
-    r <- results[[i]]
-    if (length(r$config$file_fields) > 0 && !is.null(r$ident_records) && nrow(r$ident_records) > 0) {
-      files <- download_instrument_files(cfg$api_url, cfg$token, r$ident_records, id_field, r$config)
-      results[[i]]$files <- files
-      cat(str_green("  \u2713 "), r$config$label, ": ", length(files), " fichiers téléchargés\n", sep = "")
-    }
-  }
+  metadata <- pipeline$metadata
+  results <- pipeline$results
 
   # 5. Générer le QMD
   cat("  Génération du template Quarto...\n")
@@ -334,7 +326,7 @@ cmd_clean <- function() {
 run_interactive_menu <- function() {
   items <- list(
     list(name = "Métadonnées", desc = "Récupère instruments + métadonnées + dictionnaire.csv", action = cmd_metadata),
-    list(name = "Téléchargements", desc = "Télécharge toutes les données en CSV", action = cmd_export),
+    list(name = "Téléchargements", desc = "Pipeline complet par vagues (sans rapport)", action = cmd_export),
     list(name = "Diffusion", desc = "Récupère les paramètres de diffusion", action = cmd_diffusion),
     list(
       name = "Rapport Profils", desc = "Génère le rapport des profils chercheurs (PDF)",

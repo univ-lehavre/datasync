@@ -2,7 +2,7 @@
 .env
 
 # Données exportées (sensibles)
-data/
+downloads/
 
 # Rapports générés
 reports/
@@ -19,6 +19,10 @@ bin/
 
 # Task
 .task/
+
+# ECRIN — état interne (généré, non versionné)
+.ecrin/
+stacks/*.state.json
 
 # macOS
 .DS_Store

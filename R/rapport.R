@@ -244,7 +244,8 @@ generate_instrument_section <- function(result, metadata, section_index) {
 # ---------------------------------------------------------------------------
 # Génération du rapport Quarto QMD
 # ---------------------------------------------------------------------------
-generate_report_qmd <- function(audience, metadata, results) {
+generate_report_qmd <- function(audience, metadata, results,
+                                qmd_path = file.path(REPORTS_DIR, "rapport-ecrin.qmd")) {
   watermark <- ""
   if (audience == "chercheurs") {
     watermark <- paste0(
@@ -324,7 +325,6 @@ generate_report_qmd <- function(audience, metadata, results) {
   # Pied de page
   add(sprintf("\n---\n\n*Rapport généré le %s*", format(Sys.time(), "%Y-%m-%d %H:%M")))
 
-  qmd_path <- file.path(REPORTS_DIR, "rapport-ecrin.qmd")
   writeLines(b, qmd_path)
 
   qmd_path

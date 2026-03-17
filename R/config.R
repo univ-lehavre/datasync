@@ -13,43 +13,43 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------------
 # Constantes
 # ---------------------------------------------------------------------------
-DATA_DIR    <- "data"
+DATA_DIR <- "data"
 REPORTS_DIR <- "reports"
 RAPPORT_QMD <- "rapport-analyse-premiere-vague.qmd"
 
 # ---------------------------------------------------------------------------
 # Utilitaires console
 # ---------------------------------------------------------------------------
-cat_green  <- function(...) cat(paste0("\033[32m", ..., "\033[0m"))
-cat_cyan   <- function(...) cat(paste0("\033[36m", ..., "\033[0m"))
+cat_green <- function(...) cat(paste0("\033[32m", ..., "\033[0m"))
+cat_cyan <- function(...) cat(paste0("\033[36m", ..., "\033[0m"))
 cat_yellow <- function(...) cat(paste0("\033[33m", ..., "\033[0m"))
-cat_bold   <- function(...) cat(paste0("\033[1m",  ..., "\033[0m"))
-cat_red    <- function(...) cat(paste0("\033[31m", ..., "\033[0m"))
-cat_gray   <- function(...) cat(paste0("\033[90m", ..., "\033[0m"))
+cat_bold <- function(...) cat(paste0("\033[1m", ..., "\033[0m"))
+cat_red <- function(...) cat(paste0("\033[31m", ..., "\033[0m"))
+cat_gray <- function(...) cat(paste0("\033[90m", ..., "\033[0m"))
 
-str_green  <- function(x) paste0("\033[32m", x, "\033[0m")
-str_cyan   <- function(x) paste0("\033[36m", x, "\033[0m")
+str_green <- function(x) paste0("\033[32m", x, "\033[0m")
+str_cyan <- function(x) paste0("\033[36m", x, "\033[0m")
 str_yellow <- function(x) paste0("\033[33m", x, "\033[0m")
-str_bold   <- function(x) paste0("\033[1m",  x, "\033[0m")
-str_red    <- function(x) paste0("\033[31m", x, "\033[0m")
-str_gray   <- function(x) paste0("\033[90m", x, "\033[0m")
+str_bold <- function(x) paste0("\033[1m", x, "\033[0m")
+str_red <- function(x) paste0("\033[31m", x, "\033[0m")
+str_gray <- function(x) paste0("\033[90m", x, "\033[0m")
 
 # ---------------------------------------------------------------------------
 # Chargement du .env
 # ---------------------------------------------------------------------------
 load_env <- function() {
-  if (!file.exists(".env")) return(invisible(NULL))
+  if (!file.exists(".env")) {
+    return(invisible(NULL))
+  }
   lines <- readLines(".env", warn = FALSE)
   for (line in lines) {
     line <- trimws(line)
     if (nchar(line) == 0 || startsWith(line, "#")) next
     parts <- strsplit(line, "=", fixed = TRUE)[[1]]
     if (length(parts) >= 2) {
-      key   <- trimws(parts[1])
+      key <- trimws(parts[1])
       value <- trimws(paste(parts[-1], collapse = "="))
       value <- gsub('^["\']|["\']$', "", value)
-      Sys.setenv(.env_key = value)
-      names_env <- key
       do.call(Sys.setenv, setNames(list(value), key))
     }
   }
@@ -60,7 +60,7 @@ load_env <- function() {
 # ---------------------------------------------------------------------------
 get_config <- function() {
   api_url <- Sys.getenv("REDCAP_API_URL")
-  token   <- Sys.getenv("REDCAP_TOKEN")
+  token <- Sys.getenv("REDCAP_TOKEN")
 
   if (nchar(token) == 0) {
     stop("REDCAP_TOKEN non défini. Créez un fichier .env avec REDCAP_TOKEN=votre_token")

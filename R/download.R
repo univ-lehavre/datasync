@@ -18,10 +18,12 @@ download_file_redcap <- function(api_url, token, record_id, field_name, dest_pat
       req_perform(),
     error = function(e) {
       message(sprintf("Erreur téléchargement fichier %s/%s: %s", record_id, field_name, conditionMessage(e)))
-      return(NULL)
+      NULL
     }
   )
-  if (is.null(resp)) return(invisible(FALSE))
+  if (is.null(resp)) {
+    return(invisible(FALSE))
+  }
   if (resp_status(resp) != 200L) {
     message(sprintf("Erreur API fichier (status %d)", resp_status(resp)))
     return(invisible(FALSE))
@@ -36,7 +38,8 @@ download_file_redcap <- function(api_url, token, record_id, field_name, dest_pat
 normalize_image_dpi <- function(image_path) {
   if (nchar(Sys.which("magick")) > 0) {
     system2("magick", c("mogrify", "-density", "72", image_path),
-            stdout = FALSE, stderr = FALSE)
+      stdout = FALSE, stderr = FALSE
+    )
   }
 }
 
@@ -44,7 +47,9 @@ normalize_image_dpi <- function(image_path) {
 # Écriture CSV d'un instrument
 # ---------------------------------------------------------------------------
 write_instrument_csv <- function(path, records, fields, id_field, include_hashed_id = FALSE) {
-  if (is.null(records) || nrow(records) == 0) return(invisible(NULL))
+  if (is.null(records) || nrow(records) == 0) {
+    return(invisible(NULL))
+  }
 
   rows <- lapply(seq_len(nrow(records)), function(i) {
     row <- character(length(fields))
@@ -115,16 +120,16 @@ download_instrument_files <- function(api_url, token, records, id_field, config)
 # ---------------------------------------------------------------------------
 download_instrument_data <- function(api_url, token, metadata, id_field, audience, config) {
   result <- list(
-    config        = config,
-    ident_records  = NULL,
+    config = config,
+    ident_records = NULL,
     pseudo_records = NULL,
-    anon_records   = NULL,
-    stats          = list(no_response = 0L, audience_filtered = 0L, aggregated = 0L),
-    files          = character(0)
+    anon_records = NULL,
+    stats = list(no_response = 0L, audience_filtered = 0L, aggregated = 0L),
+    files = character(0)
   )
 
-  split_res       <- split_fields_by_identifier(metadata, config$name)
-  identifiers     <- split_res$identifiers
+  split_res <- split_fields_by_identifier(metadata, config$name)
+  identifiers <- split_res$identifiers
   non_identifiers <- split_res$non_identifiers
   all_form_fields <- get_form_fields(metadata, config$name)
 
@@ -132,22 +137,30 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   name_fields <- c("last_name", "first_name", "middle_name")
 
   # 1. Champs de contrôle pour classifier les participants
-  control_fields  <- c(id_field, config$id_level_field, config$audience_field)
+  control_fields <- c(id_field, config$id_level_field, config$audience_field)
   control_records <- get_records_with_fields_raw(api_url, token, control_fields)
 
   if (is.null(control_records) || nrow(control_records) == 0) {
     return(result)
   }
 
-  ident_ids      <- character(0)
-  pseudo_ids     <- character(0)
-  anon_ids       <- character(0)
+  ident_ids <- character(0)
+  pseudo_ids <- character(0)
+  anon_ids <- character(0)
   aggregated_ids <- character(0)
 
   for (i in seq_len(nrow(control_records))) {
-    id           <- as.character(control_records[[id_field]][i])
-    id_level     <- if (config$id_level_field %in% names(control_records)) as.character(control_records[[config$id_level_field]][i]) else ""
-    data_audience <- if (config$audience_field  %in% names(control_records)) as.character(control_records[[config$audience_field]][i])  else ""
+    id <- as.character(control_records[[id_field]][i])
+    id_level <- if (config$id_level_field %in% names(control_records)) {
+      as.character(control_records[[config$id_level_field]][i])
+    } else {
+      ""
+    }
+    data_audience <- if (config$audience_field %in% names(control_records)) {
+      as.character(control_records[[config$audience_field]][i])
+    } else {
+      ""
+    }
 
     if (is.na(id_level) || nchar(id_level) == 0) {
       result$stats$no_response <- result$stats$no_response + 1L
@@ -208,7 +221,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
 
     if (!is.null(records) && nrow(records) > 0) {
       csv_fields <- c("hashed_id", data_fields)
-      csv_path   <- file.path(DATA_DIR, sprintf("vague3_%s_pseudonymises.csv", config$name))
+      csv_path <- file.path(DATA_DIR, sprintf("vague3_%s_pseudonymises.csv", config$name))
       write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = TRUE)
       result$pseudo_records <- records
     }
@@ -244,7 +257,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
     csv_path <- file.path(DATA_DIR, sprintf("vague5_%s_statistiques.csv", config$name))
     stats_df <- data.frame(
       categorie = c("sans_reponse", "filtre_audience", "agreges", "total"),
-      nombre    = c(
+      nombre = c(
         result$stats$no_response,
         result$stats$audience_filtered,
         result$stats$aggregated,

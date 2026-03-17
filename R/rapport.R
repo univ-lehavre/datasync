@@ -5,12 +5,12 @@
 # ---------------------------------------------------------------------------
 generate_variables_csv <- function(metadata, filepath) {
   df <- data.frame(
-    instrument      = metadata$form_name,
-    variable        = metadata$field_name,
-    label           = metadata$field_label,
-    type            = metadata$field_type,
-    choices         = metadata$select_choices_or_calculations,
-    required        = metadata$required_field,
+    instrument = metadata$form_name,
+    variable = metadata$field_name,
+    label = metadata$field_label,
+    type = metadata$field_type,
+    choices = metadata$select_choices_or_calculations,
+    required = metadata$required_field,
     branching_logic = metadata$branching_logic,
     stringsAsFactors = FALSE
   )
@@ -22,7 +22,9 @@ generate_variables_csv <- function(metadata, filepath) {
 # ---------------------------------------------------------------------------
 generate_report <- function(instruments, metadata, filepath) {
   lines <- character(0)
-  add   <- function(...) { lines <<- c(lines, paste0(...)) }
+  add <- function(...) {
+    lines <<- c(lines, paste0(...))
+  }
 
   add(strrep("=", 60))
   add("RAPPORT DES VARIABLES REDCAP")
@@ -45,14 +47,15 @@ generate_report <- function(instruments, metadata, filepath) {
     add("")
 
     for (j in seq_len(nrow(vars))) {
-      v        <- vars[j, ]
+      v <- vars[j, ]
       required <- if (!is.na(v$required_field) && v$required_field == "y") "★ " else "  "
       add(required, "• ", v$field_name, " [", v$field_type, "]")
       add("    Label: ", v$field_label)
 
-      if (!is.na(v$select_choices_or_calculations) &&
-          nchar(v$select_choices_or_calculations) > 0 &&
-          v$field_type %in% c("dropdown", "radio", "checkbox")) {
+      has_choices <- !is.na(v$select_choices_or_calculations) &&
+        nchar(v$select_choices_or_calculations) > 0 &&
+        v$field_type %in% c("dropdown", "radio", "checkbox")
+      if (has_choices) {
         add("    Choix: ", v$select_choices_or_calculations)
       }
 
@@ -80,7 +83,7 @@ translate_field_type <- function(field_type) {
     file       = "Fichier",
     notes      = "Zone de texte",
     sql        = "Liste dynamique",
-    field_type  # défaut : valeur brute
+    field_type # défaut : valeur brute
   )
 }
 
@@ -115,22 +118,24 @@ generate_instrument_variables_table <- function(metadata, form_name, has_identif
 # Section QMD d'un instrument
 # ---------------------------------------------------------------------------
 generate_instrument_section <- function(result, metadata, section_index) {
-  name    <- result$config$name
-  label   <- result$config$label
-  prefix  <- sprintf("%s_%d", name, section_index)
+  name <- result$config$name
+  label <- result$config$label
+  prefix <- sprintf("%s_%d", name, section_index)
 
-  n_ident  <- if (!is.null(result$ident_records))  nrow(result$ident_records)  else 0L
+  n_ident <- if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L
   n_pseudo <- if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) else 0L
-  n_anon   <- if (!is.null(result$anon_records))   nrow(result$anon_records)   else 0L
-  n_stats  <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
-  n_total  <- n_ident + n_pseudo + n_anon + n_stats
+  n_anon <- if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L
+  n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
+  n_total <- n_ident + n_pseudo + n_anon + n_stats
 
   if (n_total == 0) {
     return(sprintf("\n## %s\n\nAucune donnée pour cet instrument.\n\n", label))
   }
 
   b <- character(0)
-  add <- function(...) { b <<- c(b, paste0(...)) }
+  add <- function(...) {
+    b <<- c(b, paste0(...))
+  }
 
   add("\n## ", label, "\n")
 
@@ -146,10 +151,12 @@ generate_instrument_section <- function(result, metadata, section_index) {
   add("#| label: stats-", prefix)
   add("#| results: asis")
   add("")
-  add(sprintf('ident_%s <- tryCatch(read_csv("../data/vague2_%s_identifiables.csv", show_col_types = FALSE), error = function(e) tibble())', prefix, name))
-  add(sprintf('pseudo_%s <- tryCatch(read_csv("../data/vague3_%s_pseudonymises.csv", show_col_types = FALSE), error = function(e) tibble())', prefix, name))
-  add(sprintf('anon_%s <- tryCatch(read_csv("../data/vague4_%s_anonymises.csv", show_col_types = FALSE), error = function(e) tibble())', prefix, name))
-  add(sprintf('stats_%s <- tryCatch(read_csv("../data/vague5_%s_statistiques.csv", show_col_types = FALSE), error = function(e) tibble(categorie = character(), nombre = integer()))', prefix, name))
+  tpl_csv <- "show_col_types = FALSE), error = function(e) tibble())"
+  add("ident_", prefix, " <- tryCatch(read_csv(\"../data/vague2_", name, "_identifiables.csv\", ", tpl_csv)
+  add("pseudo_", prefix, " <- tryCatch(read_csv(\"../data/vague3_", name, "_pseudonymises.csv\", ", tpl_csv)
+  add("anon_", prefix, " <- tryCatch(read_csv(\"../data/vague4_", name, "_anonymises.csv\", ", tpl_csv)
+  tpl_csv_stats <- "show_col_types = FALSE), error = function(e) tibble(categorie = character(), nombre = integer()))"
+  add("stats_", prefix, " <- tryCatch(read_csv(\"../data/vague5_", name, "_statistiques.csv\", ", tpl_csv_stats)
   add("")
   add(sprintf("n_ident <- nrow(ident_%s)", prefix))
   add(sprintf("n_pseudo <- nrow(pseudo_%s)", prefix))
@@ -189,7 +196,10 @@ generate_instrument_section <- function(result, metadata, section_index) {
     add(sprintf("  display_cols <- names(ident_%s)", prefix))
     add("  # Limiter à 6 colonnes pour la lisibilité")
     add("  if (length(display_cols) > 6) display_cols <- display_cols[1:6]")
-    add(sprintf('  kable(ident_%s[, display_cols], caption = paste0("Identifiables (", nrow(ident_%s), ")")) %%>%%', prefix, prefix))
+    add(sprintf(
+      '  kable(ident_%s[, display_cols], caption = paste0("Identifiables (", nrow(ident_%s), ")")) %%>%%',
+      prefix, prefix
+    ))
     add('    kable_styling(latex_options = c("striped", "hold_position", "scale_down")) %>%')
     add("    print()")
     add("}")
@@ -206,7 +216,10 @@ generate_instrument_section <- function(result, metadata, section_index) {
     add(sprintf("if (nrow(pseudo_%s) > 0) {", prefix))
     add(sprintf("  display_cols <- names(pseudo_%s)", prefix))
     add("  if (length(display_cols) > 6) display_cols <- display_cols[1:6]")
-    add(sprintf('  kable(pseudo_%s[, display_cols], caption = paste0("Pseudonymisés (", nrow(pseudo_%s), ")")) %%>%%', prefix, prefix))
+    add(sprintf(
+      '  kable(pseudo_%s[, display_cols], caption = paste0("Pseudonymisés (", nrow(pseudo_%s), ")")) %%>%%',
+      prefix, prefix
+    ))
     add('    kable_styling(latex_options = c("striped", "hold_position", "scale_down")) %>%')
     add("    print()")
     add("}")
@@ -245,7 +258,9 @@ generate_report_qmd <- function(audience, metadata, results) {
   audience_label <- if (audience == "chercheurs") "Chercheurs autorisés" else "Grand public"
 
   b <- character(0)
-  add <- function(...) { b <<- c(b, paste0(...)) }
+  add <- function(...) {
+    b <<- c(b, paste0(...))
+  }
 
   # En-tête YAML
   add("---")
@@ -290,11 +305,11 @@ generate_report_qmd <- function(audience, metadata, results) {
   add("|------------|:---:|:---:|:---:|:---:|:---:|")
 
   for (r in results) {
-    n_i     <- if (!is.null(r$ident_records))  nrow(r$ident_records)  else 0L
-    n_p     <- if (!is.null(r$pseudo_records)) nrow(r$pseudo_records) else 0L
-    n_a     <- if (!is.null(r$anon_records))   nrow(r$anon_records)   else 0L
-    n_st    <- r$stats$no_response + r$stats$audience_filtered + r$stats$aggregated
-    n_t     <- n_i + n_p + n_a + n_st
+    n_i <- if (!is.null(r$ident_records)) nrow(r$ident_records) else 0L
+    n_p <- if (!is.null(r$pseudo_records)) nrow(r$pseudo_records) else 0L
+    n_a <- if (!is.null(r$anon_records)) nrow(r$anon_records) else 0L
+    n_st <- r$stats$no_response + r$stats$audience_filtered + r$stats$aggregated
+    n_t <- n_i + n_p + n_a + n_st
     add(sprintf("| %s | %d | %d | %d | %d | **%d** |", r$config$label, n_i, n_p, n_a, n_st, n_t))
   }
   add("")
@@ -338,7 +353,7 @@ clean_output_dir <- function() {
 # ---------------------------------------------------------------------------
 run_quarto <- function(...) {
   args <- c(...)
-  ret  <- system2("quarto", args)
+  ret <- system2("quarto", args)
   if (ret != 0) stop(sprintf("Erreur Quarto (code %d)", ret))
   invisible(ret)
 }

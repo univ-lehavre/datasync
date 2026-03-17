@@ -10,13 +10,11 @@
 #   Rscript ecrin.R rapport profils  # Génère le rapport des profils
 #   Rscript ecrin.R clean        # Supprime les fichiers générés
 
-script_dir <- tryCatch(
-  dirname(normalizePath(commandArgs(trailingOnly = FALSE)[
-    grep("--file=", commandArgs(trailingOnly = FALSE))
-  ])),
-  error = function(e) "."
-)
-if (length(script_dir) == 0 || script_dir == "") script_dir <- "."
+script_dir <- local({
+  args <- commandArgs(trailingOnly = FALSE)
+  m <- regmatches(args, regexpr("(?<=--file=).*", args, perl = TRUE))
+  if (length(m) == 1L && nchar(m) > 0L) dirname(normalizePath(m, mustWork = FALSE)) else "."
+})
 
 source(file.path(script_dir, "R/config.R"))
 source(file.path(script_dir, "R/api_redcap.R"))
@@ -40,9 +38,11 @@ cmd_instruments <- function() {
   cat(sprintf("%-30s %s\n", str_bold("Nom technique"), str_bold("Label")))
   cat(strrep("\u2500", 70), "\n", sep = "")
   for (i in seq_len(nrow(instruments))) {
-    cat(sprintf("%-30s %s\n",
+    cat(sprintf(
+      "%-30s %s\n",
       str_cyan(instruments$instrument_name[i]),
-      instruments$instrument_label[i]))
+      instruments$instrument_label[i]
+    ))
   }
   cat("\n")
 }
@@ -67,14 +67,16 @@ cmd_export <- function() {
   }
 
   cat("  Export CSV...\n")
-  keys      <- sort(names(records))
+  keys <- sort(names(records))
   timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M")
-  out_path  <- file.path(DATA_DIR, sprintf("data_export_%s.csv", timestamp))
+  out_path <- file.path(DATA_DIR, sprintf("data_export_%s.csv", timestamp))
   write_csv(records[, keys], out_path)
   cat(str_green("  \u2713 "), "Export CSV terminé\n", sep = "")
 
-  cat(sprintf("\n%s %s enregistrements exportés\n",
-    str_green("\u2713"), str_bold(as.character(nrow(records)))))
+  cat(sprintf(
+    "\n%s %s enregistrements exportés\n",
+    str_green("\u2713"), str_bold(as.character(nrow(records)))
+  ))
   cat(sprintf("  \u2192 %s\n\n", str_cyan(out_path)))
 
   cat(sprintf("  %s\n\n", str_bold("Aperçu des données:")))
@@ -86,72 +88,57 @@ cmd_metadata <- function() {
   cfg <- get_config()
   cat(sprintf("\n%s\n", str_bold("Récupération des métadonnées REDCap")))
   cat(sprintf("  URL: %s\n\n", str_cyan(cfg$api_url)))
-  dir_create(DATA_DIR,    recurse = TRUE)
-  dir_create(REPORTS_DIR, recurse = TRUE)
+  dir_create(DATA_DIR, recurse = TRUE)
 
   cat("  Récupération des instruments...\n")
   instruments <- get_instruments(cfg$api_url, cfg$token)
-  write(toJSON(instruments, pretty = TRUE, auto_unbox = TRUE),
-        file.path(DATA_DIR, "instruments.json"))
+  write(
+    toJSON(instruments, pretty = TRUE, auto_unbox = TRUE),
+    file.path(DATA_DIR, "instruments.json")
+  )
   cat(str_green("  \u2713 "), "Instruments récupérés\n", sep = "")
 
   cat("  Récupération du dictionnaire de données...\n")
   metadata <- get_metadata(cfg$api_url, cfg$token)
-  write(toJSON(metadata, pretty = TRUE, auto_unbox = TRUE),
-        file.path(DATA_DIR, "metadata.json"))
+  write(
+    toJSON(metadata, pretty = TRUE, auto_unbox = TRUE),
+    file.path(DATA_DIR, "metadata.json")
+  )
   cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
+
+  cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
+  cat(sprintf("  %s %d instruments\n", str_bold("Instruments:"), nrow(instruments)))
+  cat(sprintf("  %s %d variables\n\n", str_bold("Variables:"), nrow(metadata)))
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(DATA_DIR, "instruments.json"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(DATA_DIR, "metadata.json"))))
+}
+
+cmd_rapport_variables <- function() {
+  instruments_path <- file.path(DATA_DIR, "instruments.json")
+  metadata_path <- file.path(DATA_DIR, "metadata.json")
+
+  if (!file.exists(instruments_path) || !file.exists(metadata_path)) {
+    cat(sprintf("\n%s Métadonnées absentes. Lancez d'abord 'Métadonnées'.\n\n", str_yellow("\u26a0")))
+    return(invisible(NULL))
+  }
+
+  cat(sprintf("\n%s\n\n", str_bold("Génération du rapport des variables")))
+  dir_create(REPORTS_DIR, recurse = TRUE)
+
+  instruments <- fromJSON(instruments_path, simplifyDataFrame = TRUE)
+  metadata <- fromJSON(metadata_path, simplifyDataFrame = TRUE)
 
   cat("  Génération du CSV récapitulatif...\n")
   generate_variables_csv(metadata, file.path(REPORTS_DIR, "variables_recap.csv"))
   cat(str_green("  \u2713 "), "CSV généré\n", sep = "")
 
-  cat("  Génération du rapport...\n")
+  cat("  Génération du rapport texte...\n")
   generate_report(instruments, metadata, file.path(REPORTS_DIR, "rapport_variables.txt"))
   cat(str_green("  \u2713 "), "Rapport généré\n", sep = "")
 
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
-  cat(sprintf("  %s %d instruments\n", str_bold("Instruments:"), nrow(instruments)))
-  cat(sprintf("  %s %d variables\n\n", str_bold("Variables:"),   nrow(metadata)))
-
-  cat(sprintf("  %s\n", str_bold("Fichiers générés:")))
-  for (dir in c(DATA_DIR, REPORTS_DIR)) {
-    entries <- list.files(dir, full.names = TRUE)
-    for (e in entries) cat(sprintf("    \u2192 %s\n", str_cyan(e)))
-  }
-
-  # Aperçu des variables
-  cat(sprintf("\n  %s\n\n", str_bold("Aperçu des variables:")))
-  cat(sprintf("  %-25s %-15s %-30s\n",
-    str_bold("Variable"), str_bold("Type"), str_bold("Instrument")))
-  cat(sprintf("  %s %s %s\n", strrep("\u2500", 25), strrep("\u2500", 15), strrep("\u2500", 30)))
-  max_vars <- min(10L, nrow(metadata))
-  for (i in seq_len(max_vars)) {
-    v <- metadata[i, ]
-    cat(sprintf("  %-25s %-15s %-30s\n",
-      truncate_string(v$field_name, 25),
-      v$field_type,
-      truncate_string(v$form_name,  30)))
-  }
-  if (nrow(metadata) > 10L) {
-    cat(str_gray(sprintf("  ... et %d autres variables\n", nrow(metadata) - 10L)))
-  }
-
-  # Résumé par instrument
-  cat(sprintf("\n  %s\n\n", str_bold("Résumé par instrument:")))
-  vars_by_inst  <- tapply(metadata$field_name, metadata$form_name, length)
-  types_by_inst <- tapply(seq_len(nrow(metadata)), metadata$form_name, function(idx) {
-    tbl <- table(metadata$field_type[idx])
-    paste(sprintf("%s:%d", names(tbl), as.integer(tbl)), collapse = ", ")
-  })
-
-  for (i in seq_len(nrow(instruments))) {
-    inst  <- instruments[i, ]
-    count <- if (inst$instrument_name %in% names(vars_by_inst)) vars_by_inst[[inst$instrument_name]] else 0L
-    types <- if (inst$instrument_name %in% names(types_by_inst)) types_by_inst[[inst$instrument_name]] else ""
-    cat(sprintf("    %s (%d variables)\n", str_cyan(inst$instrument_label), count))
-    cat(sprintf("      Types: %s\n", types))
-  }
-  cat("\n")
+  cat(sprintf("    \u2192 %s\n", str_cyan(file.path(REPORTS_DIR, "variables_recap.csv"))))
+  cat(sprintf("    \u2192 %s\n\n", str_cyan(file.path(REPORTS_DIR, "rapport_variables.txt"))))
 }
 
 cmd_diffusion <- function() {
@@ -166,16 +153,18 @@ cmd_diffusion <- function() {
   cat("  Identification des champs de diffusion...\n")
   diffusion_fields <- find_diffusion_fields(metadata)
   if (nrow(diffusion_fields) == 0) {
-    cat(sprintf("\n%s Aucun champ de diffusion trouvé (patterns: *_identification_level, *_audience)\n\n",
-      str_yellow("\u26a0")))
+    cat(sprintf(
+      "\n%s Aucun champ de diffusion trouvé (patterns: *_identification_level, *_audience)\n\n",
+      str_yellow("\u26a0")
+    ))
     return(invisible(NULL))
   }
   cat(str_green("  \u2713 "), sprintf("%d champs trouvés\n", nrow(diffusion_fields)), sep = "")
 
   cat("  Récupération des valeurs...\n")
   record_id_field <- metadata$field_name[1]
-  field_names     <- c(record_id_field, diffusion_fields$field_name)
-  records         <- get_records_with_fields(cfg$api_url, cfg$token, field_names)
+  field_names <- c(record_id_field, diffusion_fields$field_name)
+  records <- get_records_with_fields(cfg$api_url, cfg$token, field_names)
   cat(str_green("  \u2713 "), "Valeurs récupérées\n", sep = "")
 
   cat("  Export CSV...\n")
@@ -189,12 +178,16 @@ cmd_diffusion <- function() {
   cat(sprintf("\n%s Terminé!\n\n", str_green("\u2713")))
   cat(sprintf("  %s %d champs de diffusion trouvés:\n", str_bold("Diffusion:"), nrow(diffusion_fields)))
   for (i in seq_len(nrow(diffusion_fields))) {
-    cat(sprintf("    \u2022 %s (%s)\n",
+    cat(sprintf(
+      "    \u2022 %s (%s)\n",
       str_cyan(diffusion_fields$field_name[i]),
-      diffusion_fields$form_name[i]))
+      diffusion_fields$form_name[i]
+    ))
   }
-  cat(sprintf("\n  %s %d enregistrements\n", str_bold("Participants:"),
-    if (!is.null(records)) nrow(records) else 0L))
+  cat(sprintf(
+    "\n  %s %d enregistrements\n", str_bold("Participants:"),
+    if (!is.null(records)) nrow(records) else 0L
+  ))
   cat(sprintf("  %s %s\n", str_bold("Fichier:"), str_cyan(out_path)))
 
   cat(sprintf("\n  %s\n\n", str_bold("Aperçu des données:")))
@@ -210,19 +203,25 @@ cmd_diffusion <- function() {
 # ---------------------------------------------------------------------------
 cmd_rapport_pdf <- function() {
   cat("\n  Compilation du rapport en PDF...\n")
-  tryCatch({
-    run_quarto("render", RAPPORT_QMD, "--to", "pdf")
-    cat(str_green("  \u2713 "), "Rapport PDF compilé\n", sep = "")
-  }, error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e))))
+  tryCatch(
+    {
+      run_quarto("render", RAPPORT_QMD, "--to", "pdf")
+      cat(str_green("  \u2713 "), "Rapport PDF compilé\n", sep = "")
+    },
+    error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e)))
+  )
   cat("\n")
 }
 
 cmd_rapport_html <- function() {
   cat("\n  Compilation du rapport en HTML...\n")
-  tryCatch({
-    run_quarto("render", RAPPORT_QMD, "--to", "html")
-    cat(str_green("  \u2713 "), "Rapport HTML compilé\n", sep = "")
-  }, error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e))))
+  tryCatch(
+    {
+      run_quarto("render", RAPPORT_QMD, "--to", "html")
+      cat(str_green("  \u2713 "), "Rapport HTML compilé\n", sep = "")
+    },
+    error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e)))
+  )
   cat("\n")
 }
 
@@ -259,7 +258,7 @@ cmd_rapport_profils <- function() {
   audience <- select_audience()
   cat(sprintf("\n  Audience sélectionnée: %s\n\n", str_cyan(audience)))
 
-  dir_create(DATA_DIR,    recurse = TRUE)
+  dir_create(DATA_DIR, recurse = TRUE)
   dir_create(REPORTS_DIR, recurse = TRUE)
 
   # 0. Nettoyage
@@ -270,8 +269,8 @@ cmd_rapport_profils <- function() {
   # 1. Métadonnées et instruments
   cat("  Récupération des métadonnées...\n")
   instruments <- get_instruments(cfg$api_url, cfg$token)
-  metadata    <- get_metadata(cfg$api_url, cfg$token)
-  id_field    <- metadata$field_name[1]
+  metadata <- get_metadata(cfg$api_url, cfg$token)
+  id_field <- metadata$field_name[1]
   cat(str_green("  \u2713 "), "Métadonnées récupérées\n", sep = "")
 
   # 2. Détecter les instruments avec diffusion
@@ -296,10 +295,11 @@ cmd_rapport_profils <- function() {
   results <- list()
   for (cfg_item in configs) {
     result <- download_instrument_data(cfg$api_url, cfg$token, metadata, id_field, audience, cfg_item)
-    n_total <- (if (!is.null(result$ident_records))  nrow(result$ident_records)  else 0L) +
-               (if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) else 0L) +
-               (if (!is.null(result$anon_records))   nrow(result$anon_records)   else 0L) +
-               result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
+    n_total <-
+      (if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L) +
+      (if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) else 0L) +
+      (if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L) +
+      result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
     n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
     stats_str <- if (n_stats > 0) sprintf(" (dont %d en statistiques seules)", n_stats) else ""
     cat(str_green("  \u2713 "), cfg_item$label, ": ", n_total, " enregistrements", stats_str, "\n", sep = "")
@@ -324,10 +324,13 @@ cmd_rapport_profils <- function() {
 
   # 6. Compiler en PDF
   cat("  Compilation du rapport en PDF...\n")
-  tryCatch({
-    run_quarto("render", qmd_path, "--to", "pdf")
-    cat(str_green("  \u2713 "), "Rapport compilé\n", sep = "")
-  }, error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e))))
+  tryCatch(
+    {
+      run_quarto("render", qmd_path, "--to", "pdf")
+      cat(str_green("  \u2713 "), "Rapport compilé\n", sep = "")
+    },
+    error = function(e) stop(sprintf("Erreur Quarto: %s", conditionMessage(e)))
+  )
 
   pdf_path <- sub("\\.qmd$", ".pdf", qmd_path)
   cat(sprintf("\n%s Rapport généré!\n", str_green("\u2713")))
@@ -341,7 +344,7 @@ cmd_clean <- function() {
   cat(sprintf("\n%s\n\n", str_bold("Nettoyage des fichiers générés")))
 
   patterns <- list(
-    list(path = DATA_DIR,    is_dir = TRUE),
+    list(path = DATA_DIR, is_dir = TRUE),
     list(path = REPORTS_DIR, is_dir = TRUE)
   )
 
@@ -375,20 +378,28 @@ cmd_clean <- function() {
 # ---------------------------------------------------------------------------
 run_interactive_menu <- function() {
   items <- list(
-    list(name = "Métadonnées",       desc = "Récupère les métadonnées complètes (instruments, variables)", action = cmd_metadata),
-    list(name = "Instruments",       desc = "Affiche la liste des instruments",                            action = cmd_instruments),
-    list(name = "Export",            desc = "Exporte les données en CSV",                                  action = cmd_export),
-    list(name = "Diffusion",         desc = "Récupère les paramètres de diffusion",                        action = cmd_diffusion),
-    list(name = "Rapport Profils",   desc = "Génère le rapport des profils chercheurs (PDF)",               action = cmd_rapport_profils),
-    list(name = "Rapport PDF",       desc = "Compile le rapport Quarto complet en PDF",                    action = cmd_rapport_pdf),
-    list(name = "Rapport HTML",      desc = "Compile le rapport Quarto complet en HTML",                   action = cmd_rapport_html),
-    list(name = "Preview",           desc = "Lance le preview Quarto",                                     action = cmd_rapport_preview),
-    list(name = "Nettoyage",         desc = "Supprime les fichiers générés",                               action = cmd_clean),
-    list(name = "Quitter",           desc = "Ferme le programme",                                          action = NULL)
+    list(name = "Métadonnées", desc = "Récupère instruments + dictionnaire REDCap", action = cmd_metadata),
+    list(name = "Instruments", desc = "Affiche la liste des instruments", action = cmd_instruments),
+    list(
+      name = "Rapport variables", desc = "Génère variables_recap.csv + rapport_variables.txt",
+      action = cmd_rapport_variables
+    ),
+    list(name = "Export", desc = "Exporte les données en CSV", action = cmd_export),
+    list(name = "Diffusion", desc = "Récupère les paramètres de diffusion", action = cmd_diffusion),
+    list(
+      name = "Rapport Profils", desc = "Génère le rapport des profils chercheurs (PDF)",
+      action = cmd_rapport_profils
+    ),
+    list(name = "Rapport PDF", desc = "Compile le rapport Quarto en PDF", action = cmd_rapport_pdf),
+    list(name = "Rapport HTML", desc = "Compile le rapport Quarto en HTML", action = cmd_rapport_html),
+    list(name = "Preview", desc = "Lance le preview Quarto", action = cmd_rapport_preview),
+    list(name = "Nettoyage", desc = "Supprime les fichiers générés", action = cmd_clean),
+    list(name = "Quitter", desc = "Ferme le programme", action = NULL)
   )
 
   repeat {
-    cat(sprintf("\n%s\n", str_bold("======================================="))  )
+    cat(sprintf("\n%s\n", str_bold("=======================================")))
+
     cat(sprintf("  %s - Menu principal\n", str_bold("ECRIN")))
     cat(sprintf("%s\n\n", str_bold("=======================================")))
 
@@ -441,42 +452,46 @@ main <- function() {
 
   cmd <- tolower(args[1])
 
-  tryCatch({
-    switch(cmd,
-      "metadata"   = ,
-      "m"          = cmd_metadata(),
-      "instruments"= ,
-      "i"          = cmd_instruments(),
-      "export"     = ,
-      "e"          = cmd_export(),
-      "diffusion"  = ,
-      "d"          = cmd_diffusion(),
-      "rapport"    = ,
-      "r"          = {
-        sub_cmd <- if (length(args) >= 2) tolower(args[2]) else "pdf"
-        switch(sub_cmd,
-          "profils"  = cmd_rapport_profils(),
-          "pdf"      = cmd_rapport_pdf(),
-          "html"     = cmd_rapport_html(),
-          "preview"  = cmd_rapport_preview(),
-          {
-            cat(sprintf("Sous-commande rapport inconnue: %s\n", sub_cmd))
-            cat("Sous-commandes disponibles: profils, pdf, html, preview\n")
-          }
-        )
-      },
-      "clean"      = cmd_clean(),
-      {
-        cat(sprintf("Commande inconnue: %s\n", cmd))
-        cat("Commandes disponibles: metadata, instruments, export, diffusion, rapport [profils|pdf|html|preview], clean\n")
-        cat("Sans argument : lance le menu interactif\n")
-        quit(status = 1)
-      }
-    )
-  }, error = function(e) {
-    cat(str_red(sprintf("\nErreur: %s\n\n", conditionMessage(e))), file = stderr())
-    quit(status = 1)
-  })
+  tryCatch(
+    {
+      switch(cmd,
+        "metadata" = ,
+        "m" = cmd_metadata(),
+        "instruments" = ,
+        "i" = cmd_instruments(),
+        "export" = ,
+        "e" = cmd_export(),
+        "diffusion" = ,
+        "d" = cmd_diffusion(),
+        "rapport" = ,
+        "r" = {
+          sub_cmd <- if (length(args) >= 2) tolower(args[2]) else "pdf"
+          switch(sub_cmd,
+            "variables" = cmd_rapport_variables(),
+            "profils" = cmd_rapport_profils(),
+            "pdf" = cmd_rapport_pdf(),
+            "html" = cmd_rapport_html(),
+            "preview" = cmd_rapport_preview(),
+            {
+              cat(sprintf("Sous-commande rapport inconnue: %s\n", sub_cmd))
+              cat("Sous-commandes disponibles: variables, profils, pdf, html, preview\n")
+            }
+          )
+        },
+        "clean" = cmd_clean(),
+        {
+          cat(sprintf("Commande inconnue: %s\n", cmd))
+          cat("Commandes: metadata, instruments, export, diffusion, rapport [profils|pdf|html|preview], clean\n")
+          cat("Sans argument : lance le menu interactif\n")
+          quit(status = 1)
+        }
+      )
+    },
+    error = function(e) {
+      cat(str_red(sprintf("\nErreur: %s\n\n", conditionMessage(e))), file = stderr())
+      quit(status = 1)
+    }
+  )
 }
 
 main()

@@ -6,7 +6,7 @@
 find_diffusion_fields <- function(metadata) {
   metadata[
     str_ends(metadata$field_name, "_identification_level") |
-    str_ends(metadata$field_name, "_audience"), ,
+      str_ends(metadata$field_name, "_audience"), ,
     drop = FALSE
   ]
 }
@@ -28,15 +28,15 @@ build_instrument_configs <- function(instruments, metadata) {
     form_meta <- metadata[metadata$form_name == inst$instrument_name, ]
 
     has_identifiers <- any(form_meta$identifier == "y", na.rm = TRUE)
-    file_fields     <- form_meta$field_name[form_meta$field_type == "file"]
+    file_fields <- form_meta$field_name[form_meta$field_type == "file"]
 
     configs[[length(configs) + 1]] <- list(
-      name           = inst$instrument_name,
-      label          = inst$instrument_label,
+      name = inst$instrument_name,
+      label = inst$instrument_label,
       id_level_field = paste0(inst$instrument_name, "_identification_level"),
       audience_field = paste0(inst$instrument_name, "_data_audience"),
       has_identifiers = has_identifiers,
-      file_fields    = file_fields
+      file_fields = file_fields
     )
   }
   configs
@@ -48,9 +48,9 @@ build_instrument_configs <- function(instruments, metadata) {
 split_fields_by_identifier <- function(metadata, form_name) {
   sub <- metadata[
     metadata$form_name == form_name &
-    metadata$field_type != "descriptive" &
-    !str_ends(metadata$field_name, "_identification_level") &
-    !str_ends(metadata$field_name, "_data_audience"),
+      metadata$field_type != "descriptive" &
+      !str_ends(metadata$field_name, "_identification_level") &
+      !str_ends(metadata$field_name, "_data_audience"),
   ]
   list(
     identifiers     = sub$field_name[sub$identifier == "y"],
@@ -61,9 +61,9 @@ split_fields_by_identifier <- function(metadata, form_name) {
 get_form_fields <- function(metadata, form_name) {
   sub <- metadata[
     metadata$form_name == form_name &
-    metadata$field_type != "descriptive" &
-    !str_ends(metadata$field_name, "_identification_level") &
-    !str_ends(metadata$field_name, "_data_audience"),
+      metadata$field_type != "descriptive" &
+      !str_ends(metadata$field_name, "_identification_level") &
+      !str_ends(metadata$field_name, "_data_audience"),
   ]
   sub$field_name
 }

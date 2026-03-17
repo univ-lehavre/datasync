@@ -4,7 +4,9 @@
 # Troncature de chaîne
 # ---------------------------------------------------------------------------
 truncate_string <- function(s, max_len) {
-  if (nchar(s) <= max_len) return(s)
+  if (nchar(s) <= max_len) {
+    return(s)
+  }
   paste0(substr(s, 1, max_len - 1), "\u2026")
 }
 
@@ -12,10 +14,12 @@ truncate_string <- function(s, max_len) {
 # Tableau de records en console
 # ---------------------------------------------------------------------------
 print_records_table <- function(records, columns, max_rows = 5) {
-  if (is.null(records) || nrow(records) == 0 || length(columns) == 0) return(invisible(NULL))
+  if (is.null(records) || nrow(records) == 0 || length(columns) == 0) {
+    return(invisible(NULL))
+  }
 
   max_col_width <- 25L
-  col_widths    <- nchar(columns)
+  col_widths <- nchar(columns)
 
   row_count <- min(nrow(records), max_rows)
 
@@ -30,7 +34,10 @@ print_records_table <- function(records, columns, max_rows = 5) {
   col_widths <- pmin(col_widths, max_col_width)
 
   # En-tête
-  header <- paste(mapply(function(col, w) formatC(truncate_string(col, w), width = -w), columns, col_widths), collapse = " ")
+  header <- paste(
+    mapply(function(col, w) formatC(truncate_string(col, w), width = -w), columns, col_widths),
+    collapse = " "
+  )
   cat("  ", header, "\n", sep = "")
   sep <- paste(vapply(col_widths, function(w) strrep("\u2500", w), character(1)), collapse = " ")
   cat("  ", sep, "\n", sep = "")
@@ -53,15 +60,17 @@ print_records_table <- function(records, columns, max_rows = 5) {
 # Statistiques de records en console
 # ---------------------------------------------------------------------------
 print_records_stats <- function(records, columns) {
-  if (is.null(records) || nrow(records) == 0) return(invisible(NULL))
+  if (is.null(records) || nrow(records) == 0) {
+    return(invisible(NULL))
+  }
   cat(sprintf("\n  %s\n", str_bold("Statistiques:")))
 
   for (col in columns) {
     cat(sprintf("\n    %s:\n", str_cyan(col)))
     vals <- if (col %in% names(records)) as.character(records[[col]]) else rep("", nrow(records))
     vals[is.na(vals)] <- ""
-    empty_count  <- sum(vals == "" | vals == "NA")
-    non_empty    <- vals[vals != "" & vals != "NA"]
+    empty_count <- sum(vals == "" | vals == "NA")
+    non_empty <- vals[vals != "" & vals != "NA"]
 
     if (empty_count > 0) {
       pct <- empty_count * 100 / nrow(records)

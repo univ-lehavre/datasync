@@ -7,9 +7,9 @@ script_dir <- local({
   args <- commandArgs(trailingOnly = FALSE)
   m <- regmatches(args, regexpr("(?<=--file=).*", args, perl = TRUE))
   if (length(m) == 1L && nchar(m) > 0L) {
-    dirname(normalizePath(dirname(m), mustWork = FALSE))
+    file.path(dirname(normalizePath(dirname(m), mustWork = FALSE)), "..", "R")
   } else {
-    "."
+    file.path(".", "R")
   }
 })
 

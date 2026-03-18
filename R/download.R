@@ -177,7 +177,9 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
       next
     }
 
-    if (grepl("Identifiable", id_level, fixed = TRUE)) {
+    if (audience == "admin") {
+      ident_ids <- c(ident_ids, id)
+    } else if (grepl("Identifiable", id_level, fixed = TRUE)) {
       ident_ids <- c(ident_ids, id)
     } else if (grepl("Pseudonymised", id_level, fixed = TRUE)) {
       pseudo_ids <- c(pseudo_ids, id)

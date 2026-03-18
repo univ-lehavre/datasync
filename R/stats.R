@@ -31,6 +31,14 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     }
     if (is.na(valid_type)) valid_type <- ""
 
+    branching <- if ("branching_logic" %in% names(form_dict)) {
+      form_dict$branching_logic[i]
+    } else {
+      ""
+    }
+    conditional <- !is.na(branching) && nchar(trimws(branching)) > 0
+    missing_label <- if (conditional) "n_applicable" else "n_manquants"
+
     if (ftype == "checkbox") {
       # Colonnes checkbox : field___1, field___2, ...
       checkbox_cols <- names(records)[startsWith(names(records), paste0(field, "___"))]
@@ -48,8 +56,8 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
         }
         cvals <- as.character(records[[col]])
         non_obf_c <- cvals[cvals != "***"]
-        n_manq <- sum(is.na(non_obf_c) | non_obf_c == "" | non_obf_c == "NA")
         filled_c <- non_obf_c[!is.na(non_obf_c) & non_obf_c != "" & non_obf_c != "NA"]
+        n_empty_c <- length(non_obf_c) - length(filled_c)
         # Codes bruts "1"/"0" ou labels "Checked"/"Unchecked" selon export REDCap
         checked_vals <- c("1", "Checked", "Oui", "Yes")
         n_coches <- sum(filled_c %in% checked_vals)
@@ -59,8 +67,8 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
             valeur = as.character(n_coches), stringsAsFactors = FALSE
           ),
           data.frame(
-            variable = field, statistique = "n_manquants",
-            valeur = as.character(n_manq), stringsAsFactors = FALSE
+            variable = field, statistique = missing_label,
+            valeur = as.character(n_empty_c), stringsAsFactors = FALSE
           )
         ))
       }
@@ -87,51 +95,29 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
       next
     }
 
-    if (ftype == "yesno") {
+    if (ftype %in% c("yesno", "radio", "dropdown", "sql")) {
+      option_labels <- if (ftype != "yesno") parse_choices(choices) else NULL
       non_obf <- vals[vals != "***"]
-      n_manq <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
+      n_missing <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
       filled <- non_obf[!is.na(non_obf) & non_obf != "" & non_obf != "NA"]
       freq <- sort(table(filled), decreasing = TRUE)
       for (k in names(freq)) {
-        rows <- c(rows, list(
-          data.frame(
-            variable = field, statistique = k,
-            valeur = as.character(freq[[k]]), stringsAsFactors = FALSE
-          )
-        ))
-      }
-      rows <- c(rows, list(
-        data.frame(
-          variable = field, statistique = "n_manquants",
-          valeur = as.character(n_manq), stringsAsFactors = FALSE
-        )
-      ))
-      next
-    }
-
-    if (ftype %in% c("radio", "dropdown", "sql")) {
-      option_labels <- parse_choices(choices)
-      non_obf <- vals[vals != "***"]
-      n_manq <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
-      filled <- non_obf[!is.na(non_obf) & non_obf != "" & non_obf != "NA"]
-      freq <- sort(table(filled), decreasing = TRUE)
-      for (k in names(freq)) {
-        label <- if (!is.null(option_labels) && k %in% names(option_labels)) {
+        lbl <- if (!is.null(option_labels) && k %in% names(option_labels)) {
           option_labels[[k]]
         } else {
           k
         }
         rows <- c(rows, list(
           data.frame(
-            variable = field, statistique = label,
+            variable = field, statistique = lbl,
             valeur = as.character(freq[[k]]), stringsAsFactors = FALSE
           )
         ))
       }
       rows <- c(rows, list(
         data.frame(
-          variable = field, statistique = "n_manquants",
-          valeur = as.character(n_manq), stringsAsFactors = FALSE
+          variable = field, statistique = missing_label,
+          valeur = as.character(n_missing), stringsAsFactors = FALSE
         )
       ))
       next
@@ -139,15 +125,15 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
 
     # text, notes, calc, slider, et autres
     n_rens <- sum(!is.na(vals) & vals != "" & vals != "NA" & vals != "***")
-    n_manq <- sum(is.na(vals) | vals == "" | vals == "NA" | vals == "***")
+    n_missing <- sum(is.na(vals) | vals == "" | vals == "NA" | vals == "***")
     rows <- c(rows, list(
       data.frame(
         variable = field, statistique = "n_renseignes",
         valeur = as.character(n_rens), stringsAsFactors = FALSE
       ),
       data.frame(
-        variable = field, statistique = "n_manquants",
-        valeur = as.character(n_manq), stringsAsFactors = FALSE
+        variable = field, statistique = missing_label,
+        valeur = as.character(n_missing), stringsAsFactors = FALSE
       )
     ))
   }

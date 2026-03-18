@@ -431,18 +431,25 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
         }
         result = run_r_task("fetch_control.R", task)
         if result.get("has_changes"):
-            n_changed = len(result.get("changed_record_ids", []))
+            changed_ids = result.get("changed_record_ids", [])
+            n_changed = len(changed_ids)
+            n_total = result.get("n_total", "?")
             diff.append({
                 "instrument": inst,
                 "action": "modified",
-                "reason": f"{n_changed} enregistrement(s) modifié(s) depuis {downloaded_at[:10]}",
-                "changed_record_ids": result.get("changed_record_ids", []),
+                "reason": (
+                    f"{n_changed}/{n_total} enregistrement(s) modifié(s) depuis {downloaded_at[:10]}"
+                    if n_changed > 0
+                    else f"nouveaux enregistrements détectés (total : {n_total}) depuis {downloaded_at[:10]}"
+                ),
+                "changed_record_ids": changed_ids,
             })
         else:
+            n_total = result.get("n_total", "?")
             diff.append({
                 "instrument": inst,
                 "action": "ok",
-                "reason": "en cache (intègre, inchangé)",
+                "reason": f"en cache — {n_total} enregistrement(s), aucun changement depuis {downloaded_at[:10]}",
             })
 
     return diff

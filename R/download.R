@@ -62,7 +62,8 @@ write_instrument_csv <- function(path, records, fields, id_field, include_hashed
       if (f == "hashed_id" && include_hashed_id) {
         row[j] <- if (id_field %in% names(records)) hash_id(as.character(records[[id_field]][i])) else ""
       } else {
-        row[j] <- if (f %in% names(records)) as.character(records[[f]][i]) else ""
+        val <- if (f %in% names(records)) as.character(records[[f]][i]) else ""
+        row[j] <- gsub("[\r\n]+", " ", val)
       }
     }
     row

@@ -22,21 +22,26 @@ task_idx <- which(args == "--task")
 if (length(task_idx) == 0L) stop("Argument --task manquant")
 task <- fromJSON(args[task_idx + 1L])
 
-dir_create(METADATA_DIR, recurse = TRUE)
+metadata_dir <- if (!is.null(task$metadata_dir) && nchar(task$metadata_dir) > 0) {
+  task$metadata_dir
+} else {
+  METADATA_DIR
+}
+dir_create(metadata_dir, recurse = TRUE)
 
 instruments <- get_instruments(task$api_url, task$token)
 write(
   toJSON(instruments, pretty = TRUE, auto_unbox = TRUE),
-  file.path(METADATA_DIR, "instruments.json")
+  file.path(metadata_dir, "instruments.json")
 )
 
 metadata <- get_metadata(task$api_url, task$token)
 write(
   toJSON(metadata, pretty = TRUE, auto_unbox = TRUE),
-  file.path(METADATA_DIR, "metadata.json")
+  file.path(metadata_dir, "metadata.json")
 )
 
-generate_variables_csv(metadata, file.path(METADATA_DIR, "dictionnaire.csv"))
+generate_variables_csv(metadata, file.path(metadata_dir, "dictionnaire.csv"))
 
 cat(toJSON(list(
   ok = TRUE,

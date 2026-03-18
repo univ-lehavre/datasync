@@ -39,8 +39,7 @@ from rich.table import Table
 STACKS_DIR = Path("stacks")
 ECRIN_DIR = Path(".ecrin")
 ACTIVE_STACK_FILE = ECRIN_DIR / "active-stack"
-DOWNLOADS_DATA_DIR = Path("downloads/data")
-UP_LOG_FILE = DOWNLOADS_DATA_DIR / ".up-log.json"
+DOWNLOADS_DIR = Path("downloads")
 SCHEMA_VERSION = 1
 
 app = typer.Typer(help="Orchestrateur déclaratif ECRIN", no_args_is_help=True)
@@ -56,7 +55,11 @@ console = Console()
 
 
 def stack_data_dir(name: str) -> Path:
-    return DOWNLOADS_DATA_DIR / name
+    return DOWNLOADS_DIR / name
+
+
+def stack_metadata_dir(name: str) -> Path:
+    return stack_data_dir(name) / "metadata"
 
 
 def redcap_state_file(name: str) -> Path:
@@ -69,6 +72,10 @@ def backup_dir(name: str) -> Path:
 
 def up_in_progress_file(name: str) -> Path:
     return stack_data_dir(name) / ".up-in-progress.json"
+
+
+def up_log_file(name: str) -> Path:
+    return stack_data_dir(name) / ".up-log.json"
 
 
 # ---------------------------------------------------------------------------
@@ -293,15 +300,16 @@ def check_interrupted_up(stack_name: str) -> dict | None:
     return None
 
 
-def append_up_log(entry: dict) -> None:
+def append_up_log(stack_name: str, entry: dict) -> None:
     """Ajoute une entrée au log de up (append-only)."""
-    UP_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log_path = up_log_file(stack_name)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     log: list = []
-    if UP_LOG_FILE.exists():
-        with UP_LOG_FILE.open() as f:
+    if log_path.exists():
+        with log_path.open() as f:
             log = json.load(f)
     log.append(entry)
-    save_json(UP_LOG_FILE, log)
+    save_json(log_path, log)
 
 
 # ---------------------------------------------------------------------------
@@ -316,16 +324,17 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
     """
     redcap_state = load_redcap_state(stack_name)
     data_dir = stack_data_dir(stack_name)
+    meta_dir = stack_metadata_dir(stack_name)
 
-    metadata_path = Path("downloads/metadata/metadata.json")
-    instruments_path = Path("downloads/metadata/instruments.json")
+    metadata_path = meta_dir / "metadata.json"
+    instruments_path = meta_dir / "instruments.json"
 
     # Toujours télécharger les métadonnées, mais ne signaler le changement que si le SHA-256 diffère
     old_hashes = {
         "metadata.json": redcap_state.get("_metadata", {}).get("metadata.json", ""),
         "instruments.json": redcap_state.get("_metadata", {}).get("instruments.json", ""),
     }
-    run_r_task("fetch_metadata.R", api_cfg)
+    run_r_task("fetch_metadata.R", {**api_cfg, "metadata_dir": str(meta_dir)})
     new_hashes = {
         "metadata.json": sha256_file(metadata_path) if metadata_path.exists() else "",
         "instruments.json": sha256_file(instruments_path) if instruments_path.exists() else "",
@@ -641,7 +650,7 @@ def up() -> None:
     console.print(f"\n[bold]Updating stack[/bold] [cyan]{name}[/cyan] (audience : {audience})\n")
 
     diff = compute_diff(cfg, api_cfg, name, audience)
-    metadata_path = Path("downloads/metadata/metadata.json")
+    metadata_path = stack_metadata_dir(name) / "metadata.json"
 
     if not diff:
         console.print("[yellow]Aucun instrument détecté.[/yellow]")
@@ -753,7 +762,7 @@ def up() -> None:
 
     up_in_progress_file(name).unlink(missing_ok=True)
 
-    append_up_log({
+    append_up_log(name, {
         "up_id": up_id,
         "updated_at": now,
         "stack": name,
@@ -783,8 +792,9 @@ def refresh() -> None:
 
     console.print(f"\n[bold]Refreshing stack[/bold] [cyan]{name}[/cyan]\n")
 
+    meta_dir = stack_metadata_dir(name)
     console.print("  Récupération des métadonnées REDCap...")
-    run_r_task("fetch_metadata.R", api_cfg)
+    run_r_task("fetch_metadata.R", {**api_cfg, "metadata_dir": str(meta_dir)})
     console.print("  [green]✓[/green] Métadonnées mises à jour")
 
     redcap_state = load_redcap_state(name)
@@ -838,7 +848,7 @@ def cancel() -> None:
 
     up_in_progress_file(name).unlink(missing_ok=True)
 
-    append_up_log({
+    append_up_log(name, {
         "up_id": f"cancel-{make_up_id()}",
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         "stack": interrupted.get("stack", "—"),
@@ -897,7 +907,7 @@ def rollback(
 
     up_in_progress_file(name).unlink(missing_ok=True)
 
-    append_up_log({
+    append_up_log(name, {
         "up_id": f"rollback-{make_up_id()}",
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         "stack": name,
@@ -917,12 +927,14 @@ def rollback(
 
 @app.command(name="log")
 def show_log() -> None:
-    """Affiche l'historique des up."""
-    if not UP_LOG_FILE.exists():
+    """Affiche l'historique des up du stack actif."""
+    name = require_active_stack()
+    log_path = up_log_file(name)
+    if not log_path.exists():
         console.print("[yellow]Aucun historique. Lancez `up` une première fois.[/yellow]")
         return
 
-    with UP_LOG_FILE.open() as f:
+    with log_path.open() as f:
         entries: list[dict] = json.load(f)
 
     if not entries:

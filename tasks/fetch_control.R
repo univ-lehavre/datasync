@@ -37,7 +37,10 @@ if (!is.null(task$date_range_begin) && nchar(task$date_range_begin) > 0L) {
   body <- redcap_request(task$api_url, task$token, "record", extra)
   changed <- fromJSON(body, simplifyDataFrame = TRUE)
 
-  if (is.null(changed) || (is.data.frame(changed) && nrow(changed) == 0L)) {
+  no_changes <- is.null(changed) ||
+    (is.data.frame(changed) && nrow(changed) == 0L) ||
+    (is.list(changed) && !is.data.frame(changed) && length(changed) == 0L)
+  if (no_changes) {
     cat(toJSON(list(
       has_changes = FALSE,
       changed_record_ids = character(0),

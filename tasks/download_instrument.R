@@ -29,10 +29,12 @@ id_field <- metadata$field_name[1]
 config <- task$instrument
 config$file_fields <- as.character(config$file_fields)
 
-dir_create(DATA_DIR, recurse = TRUE)
+data_dir <- if (!is.null(task$data_dir) && nchar(task$data_dir) > 0) task$data_dir else DATA_DIR
+dir_create(data_dir, recurse = TRUE)
 
 result <- download_instrument_data(
-  task$api_url, task$token, metadata, id_field, task$audience, config
+  task$api_url, task$token, metadata, id_field, task$audience, config,
+  data_dir = data_dir
 )
 
 n_ident <- if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L
@@ -40,10 +42,10 @@ n_pseudo <- if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) els
 n_anon <- if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L
 
 csv_files <- list(
-  vague2 = file.path(DATA_DIR, sprintf("vague2_%s_identifiables.csv", config$name)),
-  vague3 = file.path(DATA_DIR, sprintf("vague3_%s_pseudonymises.csv", config$name)),
-  vague4 = file.path(DATA_DIR, sprintf("vague4_%s_anonymises.csv", config$name)),
-  vague5 = file.path(DATA_DIR, sprintf("vague5_%s_statistiques.csv", config$name))
+  vague2 = file.path(data_dir, sprintf("vague2_%s_identifiables.csv", config$name)),
+  vague3 = file.path(data_dir, sprintf("vague3_%s_pseudonymises.csv", config$name)),
+  vague4 = file.path(data_dir, sprintf("vague4_%s_anonymises.csv", config$name)),
+  vague5 = file.path(data_dir, sprintf("vague5_%s_statistiques.csv", config$name))
 )
 # Garder seulement les fichiers qui existent
 csv_files <- Filter(file.exists, csv_files)

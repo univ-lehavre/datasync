@@ -76,12 +76,12 @@ write_instrument_csv <- function(path, records, fields, id_field, include_hashed
 # ---------------------------------------------------------------------------
 # Téléchargement des fichiers d'un instrument
 # ---------------------------------------------------------------------------
-download_instrument_files <- function(api_url, token, records, id_field, config) {
+download_instrument_files <- function(api_url, token, records, id_field, config, data_dir = DATA_DIR) {
   if (length(config$file_fields) == 0 || is.null(records) || nrow(records) == 0) {
     return(character(0))
   }
 
-  files_dir <- file.path(DATA_DIR, "fichiers", config$name)
+  files_dir <- file.path(data_dir, "fichiers", config$name)
   dir_create(files_dir, recurse = TRUE)
 
   downloaded <- character(0)
@@ -122,7 +122,7 @@ download_instrument_files <- function(api_url, token, records, id_field, config)
 # ---------------------------------------------------------------------------
 # Téléchargement complet d'un instrument (par niveaux)
 # ---------------------------------------------------------------------------
-download_instrument_data <- function(api_url, token, metadata, id_field, audience, config) {
+download_instrument_data <- function(api_url, token, metadata, id_field, audience, config, data_dir = DATA_DIR) {
   result <- list(
     config = config,
     ident_records = NULL,
@@ -205,7 +205,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
 
     if (!is.null(records) && nrow(records) > 0) {
       csv_fields <- if (config$has_identifiers) c(identifiers, non_identifiers) else c(name_fields, all_form_fields)
-      csv_path <- file.path(DATA_DIR, sprintf("vague2_%s_identifiables.csv", config$name))
+      csv_path <- file.path(data_dir, sprintf("vague2_%s_identifiables.csv", config$name))
       write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = FALSE)
       result$ident_records <- records
     }
@@ -225,7 +225,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
 
     if (!is.null(records) && nrow(records) > 0) {
       csv_fields <- c("hashed_id", data_fields)
-      csv_path <- file.path(DATA_DIR, sprintf("vague3_%s_pseudonymises.csv", config$name))
+      csv_path <- file.path(data_dir, sprintf("vague3_%s_pseudonymises.csv", config$name))
       write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = TRUE)
       result$pseudo_records <- records
     }
@@ -244,7 +244,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
     )
 
     if (!is.null(records) && nrow(records) > 0) {
-      csv_path <- file.path(DATA_DIR, sprintf("vague4_%s_anonymises.csv", config$name))
+      csv_path <- file.path(data_dir, sprintf("vague4_%s_anonymises.csv", config$name))
       write_instrument_csv(csv_path, records, data_fields, id_field, include_hashed_id = FALSE)
       result$anon_records <- records
     }
@@ -258,7 +258,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   # 6. Export CSV statistiques
   n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
   if (n_stats > 0) {
-    csv_path <- file.path(DATA_DIR, sprintf("vague5_%s_statistiques.csv", config$name))
+    csv_path <- file.path(data_dir, sprintf("vague5_%s_statistiques.csv", config$name))
     stats_df <- data.frame(
       categorie = c("sans_reponse", "filtre_audience", "agreges", "total"),
       nombre = c(

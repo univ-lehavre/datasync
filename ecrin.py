@@ -7,7 +7,7 @@ Usage:
   ecrin.py stack select <nom>   # Active un stack
   ecrin.py stack ls             # Liste les stacks
   ecrin.py preview              # Affiche le plan sans exécuter
-  ecrin.py up                   # Crée ou met à jour les ressources
+  ecrin.py up                   # Télécharge et maintient les données du stack
   ecrin.py refresh              # Resynchronise le state avec REDCap
   ecrin.py cancel               # Annule un up interrompu
   ecrin.py rollback             # Restaure l'état précédent (N-1)
@@ -39,11 +39,8 @@ from rich.table import Table
 STACKS_DIR = Path("stacks")
 ECRIN_DIR = Path(".ecrin")
 ACTIVE_STACK_FILE = ECRIN_DIR / "active-stack"
-DATA_DIR = Path("downloads/data")
-REDCAP_STATE_FILE = DATA_DIR / ".redcap.state.json"
-BACKUP_DIR = DATA_DIR / ".backup"
-UP_LOG_FILE = DATA_DIR / ".up-log.json"
-UP_IN_PROGRESS_FILE = DATA_DIR / ".up-in-progress.json"
+DOWNLOADS_DATA_DIR = Path("downloads/data")
+UP_LOG_FILE = DOWNLOADS_DATA_DIR / ".up-log.json"
 SCHEMA_VERSION = 1
 
 app = typer.Typer(help="Orchestrateur déclaratif ECRIN", no_args_is_help=True)
@@ -51,6 +48,28 @@ stack_app = typer.Typer(help="Gestion des stacks", no_args_is_help=True)
 app.add_typer(stack_app, name="stack")
 
 console = Console()
+
+
+# ---------------------------------------------------------------------------
+# Helpers — chemins par stack
+# ---------------------------------------------------------------------------
+
+
+def stack_data_dir(name: str) -> Path:
+    return DOWNLOADS_DATA_DIR / name
+
+
+def redcap_state_file(name: str) -> Path:
+    return stack_data_dir(name) / ".redcap.state.json"
+
+
+def backup_dir(name: str) -> Path:
+    return stack_data_dir(name) / ".backup"
+
+
+def up_in_progress_file(name: str) -> Path:
+    return stack_data_dir(name) / ".up-in-progress.json"
+
 
 # ---------------------------------------------------------------------------
 # Helpers — fichiers
@@ -175,28 +194,28 @@ def get_api_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — état REDCap
+# Helpers — état REDCap (par stack)
 # ---------------------------------------------------------------------------
 
 
-def load_redcap_state() -> dict:
-    return load_json(REDCAP_STATE_FILE)
+def load_redcap_state(stack_name: str) -> dict:
+    return load_json(redcap_state_file(stack_name))
 
 
-def save_redcap_state(state: dict) -> None:
-    save_json(REDCAP_STATE_FILE, state)
+def save_redcap_state(stack_name: str, state: dict) -> None:
+    save_json(redcap_state_file(stack_name), state)
 
 
 def instrument_state_key(instrument_name: str, audience: str) -> str:
     return f"{instrument_name}__{audience}"
 
 
-def compute_expected_csv_files(instrument_name: str) -> list[Path]:
+def compute_expected_csv_files(instrument_name: str, data_dir: Path) -> list[Path]:
     return [
-        DATA_DIR / f"vague2_{instrument_name}_identifiables.csv",
-        DATA_DIR / f"vague3_{instrument_name}_pseudonymises.csv",
-        DATA_DIR / f"vague4_{instrument_name}_anonymises.csv",
-        DATA_DIR / f"vague5_{instrument_name}_statistiques.csv",
+        data_dir / f"vague2_{instrument_name}_identifiables.csv",
+        data_dir / f"vague3_{instrument_name}_pseudonymises.csv",
+        data_dir / f"vague4_{instrument_name}_anonymises.csv",
+        data_dir / f"vague5_{instrument_name}_statistiques.csv",
     ]
 
 
@@ -208,60 +227,68 @@ def make_up_id() -> str:
     return f"{ts}-{h}"
 
 
-def backup_current_state(up_id: str, instruments: list[str]) -> None:
+def backup_current_state(stack_name: str, up_id: str, instruments: list[str]) -> None:
     """Copie les CSV existants et le state REDCap dans .backup/ avant écrasement."""
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    bkp_dir = backup_dir(stack_name)
+    bkp_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = stack_data_dir(stack_name)
 
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name):
+        for csv_path in compute_expected_csv_files(inst_name, data_dir):
             if csv_path.exists():
-                shutil.copy2(csv_path, BACKUP_DIR / csv_path.name)
+                shutil.copy2(csv_path, bkp_dir / csv_path.name)
 
-    if REDCAP_STATE_FILE.exists():
-        shutil.copy2(REDCAP_STATE_FILE, BACKUP_DIR / ".redcap.state.json")
+    state_file = redcap_state_file(stack_name)
+    if state_file.exists():
+        shutil.copy2(state_file, bkp_dir / ".redcap.state.json")
 
-    save_json(BACKUP_DIR / ".backup-meta.json", {
+    save_json(bkp_dir / ".backup-meta.json", {
         "backed_up_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         "up_id": up_id,
         "instruments": instruments,
     })
 
 
-def restore_backup() -> bool:
+def restore_backup(stack_name: str) -> bool:
     """Restaure les CSV et le state depuis .backup/. Retourne True si succès."""
-    meta_path = BACKUP_DIR / ".backup-meta.json"
+    bkp_dir = backup_dir(stack_name)
+    meta_path = bkp_dir / ".backup-meta.json"
     if not meta_path.exists():
         return False
 
     meta = load_json(meta_path)
     instruments = meta.get("instruments", [])
+    data_dir = stack_data_dir(stack_name)
 
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name):
-            backup_csv = BACKUP_DIR / csv_path.name
+        for csv_path in compute_expected_csv_files(inst_name, data_dir):
+            backup_csv = bkp_dir / csv_path.name
             if backup_csv.exists():
                 shutil.copy2(backup_csv, csv_path)
             elif csv_path.exists():
                 csv_path.unlink()
 
-    backup_state = BACKUP_DIR / ".redcap.state.json"
+    backup_state = bkp_dir / ".redcap.state.json"
+    state_file = redcap_state_file(stack_name)
     if backup_state.exists():
-        shutil.copy2(backup_state, REDCAP_STATE_FILE)
-    elif REDCAP_STATE_FILE.exists():
-        REDCAP_STATE_FILE.unlink()
+        shutil.copy2(backup_state, state_file)
+    elif state_file.exists():
+        state_file.unlink()
 
     return True
 
 
-def check_interrupted_up() -> dict | None:
+def check_interrupted_up(stack_name: str) -> dict | None:
     """Retourne les métadonnées du up interrompu, ou None."""
-    if UP_IN_PROGRESS_FILE.exists():
-        return load_json(UP_IN_PROGRESS_FILE)
+    flag = up_in_progress_file(stack_name)
+    if flag.exists():
+        return load_json(flag)
     return None
 
 
 def append_up_log(entry: dict) -> None:
     """Ajoute une entrée au log de up (append-only)."""
+    UP_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     log: list = []
     if UP_LOG_FILE.exists():
         with UP_LOG_FILE.open() as f:
@@ -275,12 +302,13 @@ def append_up_log(entry: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def compute_diff(cfg: dict, api_cfg: dict, audience: str) -> list[dict]:
+def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> list[dict]:
     """Retourne une liste d'actions par instrument.
 
     Chaque entrée : { "instrument": {...}, "action": "ok"|"new"|"modified"|"corrupted", "reason": "..." }
     """
-    redcap_state = load_redcap_state()
+    redcap_state = load_redcap_state(stack_name)
+    data_dir = stack_data_dir(stack_name)
 
     metadata_path = Path("downloads/metadata/metadata.json")
     instruments_path = Path("downloads/metadata/instruments.json")
@@ -298,7 +326,7 @@ def compute_diff(cfg: dict, api_cfg: dict, audience: str) -> list[dict]:
     if new_hashes != old_hashes:
         redcap_state["_metadata"] = {"metadata.json": new_hashes["metadata.json"],
                                      "instruments.json": new_hashes["instruments.json"]}
-        save_redcap_state(redcap_state)
+        save_redcap_state(stack_name, redcap_state)
         if any(old_hashes.values()):
             console.print("  [yellow]~[/yellow] Métadonnées REDCap modifiées — structure mise à jour")
     with instruments_path.open() as f:
@@ -349,7 +377,7 @@ def compute_diff(cfg: dict, api_cfg: dict, audience: str) -> list[dict]:
     for inst in detected:
         key = instrument_state_key(inst["name"], audience)
         inst_state = redcap_state.get(key)
-        expected_csvs = compute_expected_csv_files(inst["name"])
+        expected_csvs = compute_expected_csv_files(inst["name"], data_dir)
 
         # 1. Vérifier intégrité des fichiers existants
         if inst_state and inst_state.get("files"):
@@ -408,29 +436,16 @@ def compute_diff(cfg: dict, api_cfg: dict, audience: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 NEW_STACK_TEMPLATE = """\
-# Stack ECRIN — configuration déclarative
-# Créé le {date}
+# Stack ECRIN — {date}
 
-rapport:
-  # Titre du rapport (apparaît dans l'en-tête du PDF/HTML)
-  titre: "{titre}"
-
-  # Audience cible du rapport
-  # "public"      → seuls les participants ayant choisi "General public"
-  # "chercheurs"  → tous les participants (rapport restreint, avec filigrane)
-  audience: "{audience}"
-
-  # Format(s) de sortie — un ou plusieurs parmi : pdf, html
-  format:
-    - pdf
-    # - html
-
-  # Chemin du rapport généré (relatif à la racine du projet)
-  output: "{output}"
+# Audience cible
+# "public"      → participants ayant choisi "General public"
+# "chercheurs"  → tous les participants
+audience: "{audience}"
 
 # Instruments à inclure
-# "auto"  → détection automatique depuis les métadonnées REDCap
-#           (tous les instruments ayant {instrument}_identification_level)
+# "auto"  → détection automatique depuis REDCap
+#           (tous les instruments ayant {{instrument}}_identification_level)
 # liste   → sélection manuelle par nom technique REDCap
 instruments: auto
 # instruments:
@@ -450,12 +465,9 @@ def new(name: str = typer.Argument(..., help="Nom du stack")) -> None:
         console.print(f"[yellow]Le stack '{name}' existe déjà.[/yellow]")
         raise typer.Exit(1)
 
-    audience = "public"
     content = NEW_STACK_TEMPLATE.format(
         date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        titre=f"Rapport ECRIN — {name}",
-        audience=audience,
-        output=f"reports/rapport-ecrin-{name}.pdf",
+        audience="public",
     )
     yml_path.write_text(content, encoding="utf-8")
 
@@ -480,17 +492,11 @@ def stack_init(name: str = typer.Argument(..., help="Nom du stack")) -> None:
         console.print(f"[yellow]Le stack '{name}' existe déjà.[/yellow]")
         raise typer.Exit(1)
 
-    example = {
-        "rapport": {
-            "titre": f"Rapport ECRIN — {name}",
-            "audience": "public",
-            "format": ["pdf"],
-            "output": f"reports/rapport-ecrin-{name}.pdf",
-        },
-        "instruments": "auto",
-    }
-    with yml_path.open("w") as f:
-        yaml.dump(example, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    content = NEW_STACK_TEMPLATE.format(
+        date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        audience="public",
+    )
+    yml_path.write_text(content, encoding="utf-8")
 
     console.print(f"[green]✓[/green] Stack '{name}' créé : {yml_path}")
     console.print(
@@ -530,7 +536,7 @@ def stack_ls() -> None:
         marker = "[cyan]*[/cyan]" if name == active else " "
         try:
             cfg = load_stack_config(name)
-            audience = cfg.get("rapport", {}).get("audience", "?")
+            audience = cfg.get("audience", "?")
         except Exception:  # noqa: BLE001
             audience = "?"
         st = load_json(stack_state_path(name))
@@ -553,10 +559,9 @@ def preview() -> None:
     cfg = load_stack_config(name)
     api_cfg = get_api_config()
 
-    audience = cfg.get("rapport", {}).get("audience", "public")
-    output = cfg.get("rapport", {}).get("output", f"reports/rapport-ecrin-{name}.pdf")
+    audience = cfg.get("audience", "public")
 
-    interrupted = check_interrupted_up()
+    interrupted = check_interrupted_up(name)
     if interrupted:
         console.print(
             f"[yellow]⚠ Le up {interrupted.get('up_id', '?')} a été interrompu "
@@ -570,7 +575,7 @@ def preview() -> None:
     console.print(f"\n[bold]Previewing updates for stack[/bold] [cyan]{name}[/cyan] "
                   f"(audience : {audience})\n")
 
-    diff = compute_diff(cfg, api_cfg, audience)
+    diff = compute_diff(cfg, api_cfg, name, audience)
 
     if not diff:
         console.print("  [yellow]Aucun instrument détecté.[/yellow]")
@@ -609,16 +614,16 @@ def preview() -> None:
 
 @app.command()
 def up() -> None:
-    """Crée ou met à jour les ressources du stack actif."""
+    """Télécharge et maintient les données du stack actif."""
     name = require_active_stack()
     cfg = load_stack_config(name)
     api_cfg = get_api_config()
 
-    audience = cfg.get("rapport", {}).get("audience", "public")
-    output = cfg.get("rapport", {}).get("output", f"reports/rapport-ecrin-{name}.pdf")
-    formats = cfg.get("rapport", {}).get("format", ["pdf"])
+    audience = cfg.get("audience", "public")
+    data_dir = stack_data_dir(name)
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    interrupted = check_interrupted_up()
+    interrupted = check_interrupted_up(name)
     if interrupted:
         console.print(
             f"[yellow]⚠ Le up {interrupted.get('up_id', '?')} a été interrompu "
@@ -628,15 +633,14 @@ def up() -> None:
 
     console.print(f"\n[bold]Updating stack[/bold] [cyan]{name}[/cyan] (audience : {audience})\n")
 
-    diff = compute_diff(cfg, api_cfg, audience)
+    diff = compute_diff(cfg, api_cfg, name, audience)
     metadata_path = Path("downloads/metadata/metadata.json")
 
     if not diff:
         console.print("[yellow]Aucun instrument détecté.[/yellow]")
         raise typer.Exit(1)
 
-    redcap_state = load_redcap_state()
-    results_for_qmd = []
+    redcap_state = load_redcap_state(name)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     up_id = make_up_id()
 
@@ -644,9 +648,9 @@ def up() -> None:
         d["instrument"]["name"] for d in diff if d["action"] != "ok"
     ]
     if instruments_to_download and not interrupted:
-        backup_current_state(up_id, instruments_to_download)
+        backup_current_state(name, up_id, instruments_to_download)
 
-    save_json(UP_IN_PROGRESS_FILE, {
+    save_json(up_in_progress_file(name), {
         "up_id": up_id,
         "started_at": now,
         "stack": name,
@@ -663,17 +667,6 @@ def up() -> None:
         if action == "ok":
             console.print(f"  [green]✓[/green] {inst['label']:<35} en cache")
             log_actions.append({"instrument": inst["name"], "status": "cached"})
-            inst_state = redcap_state.get(key, {})
-            counts = inst_state.get("counts", {})
-            results_for_qmd.append({
-                **inst,
-                "n_ident": counts.get("n_ident", 0),
-                "n_pseudo": counts.get("n_pseudo", 0),
-                "n_anon": counts.get("n_anon", 0),
-                "n_stats_no_response": counts.get("n_stats_no_response", 0),
-                "n_stats_audience_filtered": counts.get("n_stats_audience_filtered", 0),
-                "n_stats_aggregated": counts.get("n_stats_aggregated", 0),
-            })
             continue
 
         if action == "new":
@@ -689,26 +682,29 @@ def up() -> None:
             "audience": audience,
             "instrument": inst,
             "metadata_path": str(metadata_path),
+            "data_dir": str(data_dir),
         }
         dl_result = run_r_task("download_instrument.R", task)
 
         if inst.get("file_fields") and dl_result.get("n_ident", 0) > 0:
-            ident_csv = DATA_DIR / f"vague2_{inst['name']}_identifiables.csv"
+            ident_csv = data_dir / f"vague2_{inst['name']}_identifiables.csv"
             if ident_csv.exists():
                 file_task = {
                     **api_cfg,
                     "ident_csv_path": str(ident_csv),
                     "instrument": inst,
                     "metadata_path": str(metadata_path),
+                    "data_dir": str(data_dir),
                 }
                 file_result = run_r_task("download_files.R", file_task)
                 console.print(
                     f"    [green]✓[/green] {file_result.get('n_files', 0)} fichier(s) téléchargé(s)"
                 )
 
+        # Vérification SHA-256 des fichiers écrits
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
-            for csv_path in compute_expected_csv_files(inst["name"])
+            for csv_path in compute_expected_csv_files(inst["name"], data_dir)
             if csv_path.exists()
         }
 
@@ -724,47 +720,16 @@ def up() -> None:
             },
             "files": file_hashes,
         }
-        save_redcap_state(redcap_state)
+        save_redcap_state(name, redcap_state)
 
         console.print(
             f"    [green]✓[/green] {dl_result.get('n_ident', 0)} ident, "
             f"{dl_result.get('n_pseudo', 0)} pseudo, "
             f"{dl_result.get('n_anon', 0)} anon"
         )
+        if file_hashes:
+            console.print(f"    [green]✓[/green] {len(file_hashes)} CSV vérifié(s) (SHA-256)")
         log_actions.append({"instrument": inst["name"], "status": action})
-
-        results_for_qmd.append({
-            **inst,
-            "n_ident": dl_result.get("n_ident", 0),
-            "n_pseudo": dl_result.get("n_pseudo", 0),
-            "n_anon": dl_result.get("n_anon", 0),
-            "n_stats_no_response": dl_result.get("n_stats_no_response", 0),
-            "n_stats_audience_filtered": dl_result.get("n_stats_audience_filtered", 0),
-            "n_stats_aggregated": dl_result.get("n_stats_aggregated", 0),
-        })
-
-    qmd_path = Path(output).with_suffix(".qmd")
-    console.print("\n  Génération du template Quarto...")
-    qmd_task = {
-        "audience": audience,
-        "qmd_path": str(qmd_path),
-        "metadata_path": str(metadata_path),
-        "results": results_for_qmd,
-    }
-    qmd_result = run_r_task("generate_qmd.R", qmd_task)
-    console.print(f"  [green]✓[/green] QMD généré : {qmd_result.get('qmd_path', qmd_path)}")
-
-    for fmt in formats:
-        console.print(f"  Compilation en {fmt.upper()}...")
-        quarto = subprocess.run(
-            ["quarto", "render", str(qmd_path), "--to", fmt],
-            capture_output=True,
-            text=True,
-        )
-        if quarto.returncode != 0:
-            console.print(f"[red]Erreur Quarto :\n{quarto.stderr}[/red]")
-            raise typer.Exit(1)
-        console.print(f"  [green]✓[/green] Rapport {fmt.upper()} compilé")
 
     instruments_used = [d["instrument"]["name"] for d in diff]
     save_json(stack_state_path(name), {
@@ -772,12 +737,14 @@ def up() -> None:
         "stack": name,
         "last_up": now,
         "up_id": up_id,
-        "output": output,
         "instruments_used": instruments_used,
-        "config_snapshot": cfg,
+        "config_snapshot": {
+            "audience": audience,
+            "instruments": cfg.get("instruments", "auto"),
+        },
     })
 
-    UP_IN_PROGRESS_FILE.unlink(missing_ok=True)
+    up_in_progress_file(name).unlink(missing_ok=True)
 
     append_up_log({
         "up_id": up_id,
@@ -789,7 +756,8 @@ def up() -> None:
         "outcome": "success",
     })
 
-    console.print(f"\n[green]✓[/green] [bold]Rapport généré :[/bold] [cyan]{output}[/cyan]\n")
+    console.print(f"\n[green]✓[/green] [bold]Stack[/bold] [cyan]{name}[/cyan] [bold]à jour.[/bold]")
+    console.print(f"  Données dans : [cyan]{data_dir}[/cyan]\n")
 
 
 # ---------------------------------------------------------------------------
@@ -803,7 +771,8 @@ def refresh() -> None:
     name = require_active_stack()
     cfg = load_stack_config(name)
     api_cfg = get_api_config()
-    audience = cfg.get("rapport", {}).get("audience", "public")
+    audience = cfg.get("audience", "public")
+    data_dir = stack_data_dir(name)
 
     console.print(f"\n[bold]Refreshing stack[/bold] [cyan]{name}[/cyan]\n")
 
@@ -811,7 +780,7 @@ def refresh() -> None:
     run_r_task("fetch_metadata.R", api_cfg)
     console.print("  [green]✓[/green] Métadonnées mises à jour")
 
-    redcap_state = load_redcap_state()
+    redcap_state = load_redcap_state(name)
     updated = 0
     for key, inst_state in redcap_state.items():
         if not key.endswith(f"__{audience}"):
@@ -819,7 +788,7 @@ def refresh() -> None:
         inst_name = key.replace(f"__{audience}", "")
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
-            for csv_path in compute_expected_csv_files(inst_name)
+            for csv_path in compute_expected_csv_files(inst_name, data_dir)
             if csv_path.exists()
         }
         if file_hashes != inst_state.get("files", {}):
@@ -829,7 +798,7 @@ def refresh() -> None:
         else:
             console.print(f"  [green]✓[/green] {inst_name} — intègre")
 
-    save_redcap_state(redcap_state)
+    save_redcap_state(name, redcap_state)
     console.print(f"\n[green]✓[/green] Refresh terminé ({updated} fichier(s) mis à jour).\n")
 
 
@@ -841,7 +810,8 @@ def refresh() -> None:
 @app.command()
 def cancel() -> None:
     """Annule un up interrompu en restaurant le backup et en supprimant le flag."""
-    interrupted = check_interrupted_up()
+    name = require_active_stack()
+    interrupted = check_interrupted_up(name)
     if not interrupted:
         console.print("[yellow]Aucun up en cours ou interrompu.[/yellow]")
         return
@@ -850,16 +820,16 @@ def cancel() -> None:
     started_at = interrupted.get("started_at", "?")[:19]
     console.print(f"\n[bold]Cancel[/bold] — up {up_id} démarré le {started_at}\n")
 
-    meta_path = BACKUP_DIR / ".backup-meta.json"
+    meta_path = backup_dir(name) / ".backup-meta.json"
     if meta_path.exists():
         console.print("  Restauration du backup...")
-        ok = restore_backup()
+        ok = restore_backup(name)
         if ok:
             console.print("  [green]✓[/green] Backup restauré")
         else:
             console.print("  [yellow]Aucun backup à restaurer.[/yellow]")
 
-    UP_IN_PROGRESS_FILE.unlink(missing_ok=True)
+    up_in_progress_file(name).unlink(missing_ok=True)
 
     append_up_log({
         "up_id": f"cancel-{make_up_id()}",
@@ -884,7 +854,9 @@ def rollback(
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirmer sans prompt interactif"),
 ) -> None:
     """Restaure l'état précédent (N-1) : CSV et état REDCap."""
-    meta_path = BACKUP_DIR / ".backup-meta.json"
+    name = require_active_stack()
+    bkp_dir = backup_dir(name)
+    meta_path = bkp_dir / ".backup-meta.json"
     if not meta_path.exists():
         console.print("[yellow]Aucun backup disponible.[/yellow]")
         raise typer.Exit(1)
@@ -893,34 +865,35 @@ def rollback(
     backed_up_at = meta.get("backed_up_at", "—")[:19]
     up_id = meta.get("up_id", "—")
     instruments = meta.get("instruments", [])
+    data_dir = stack_data_dir(name)
 
     console.print(f"\n[bold]Rollback[/bold] — backup du {backed_up_at} (up {up_id})\n")
     console.print("  Sera restauré :")
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name):
-            backup_csv = BACKUP_DIR / csv_path.name
+        for csv_path in compute_expected_csv_files(inst_name, data_dir):
+            backup_csv = bkp_dir / csv_path.name
             if backup_csv.exists():
                 console.print(f"    [cyan]←[/cyan] {csv_path}")
             else:
                 console.print(f"    [yellow]-[/yellow] {csv_path} (absent du backup — sera supprimé)")
-    if (BACKUP_DIR / ".redcap.state.json").exists():
-        console.print(f"    [cyan]←[/cyan] {REDCAP_STATE_FILE}")
+    if (bkp_dir / ".redcap.state.json").exists():
+        console.print(f"    [cyan]←[/cyan] {redcap_state_file(name)}")
     console.print()
 
     if not yes:
         typer.confirm("Confirmer le rollback ?", abort=True)
 
-    ok = restore_backup()
+    ok = restore_backup(name)
     if not ok:
         console.print("[red]Échec du rollback.[/red]")
         raise typer.Exit(1)
 
-    UP_IN_PROGRESS_FILE.unlink(missing_ok=True)
+    up_in_progress_file(name).unlink(missing_ok=True)
 
     append_up_log({
         "up_id": f"rollback-{make_up_id()}",
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-        "stack": "—",
+        "stack": name,
         "audience": "—",
         "instruments": instruments,
         "actions": [{"instrument": i, "status": "rolled_back"} for i in instruments],
@@ -994,45 +967,20 @@ def show_log() -> None:
 def destroy(
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirmer sans prompt interactif"),
 ) -> None:
-    """Détruit toutes les ressources du stack actif."""
+    """Détruit toutes les données du stack actif."""
     name = require_active_stack()
-    cfg = load_stack_config(name)
-    audience = cfg.get("rapport", {}).get("audience", "public")
-
-    redcap_state = load_redcap_state()
-    st = load_json(stack_state_path(name))
-    instruments_used = st.get("instruments_used", [])
-
-    csv_files: list[Path] = []
-    for inst_name in instruments_used:
-        csv_files.extend(
-            p for p in compute_expected_csv_files(inst_name) if p.exists()
-        )
-    files_dir = DATA_DIR / "fichiers"
-    fichiers_dirs = [
-        files_dir / inst_name
-        for inst_name in instruments_used
-        if (files_dir / inst_name).exists()
-    ]
+    data_dir = stack_data_dir(name)
     state_file = stack_state_path(name)
-    state_keys = [
-        k for k in redcap_state
-        if k.endswith(f"__{audience}") and k.replace(f"__{audience}", "") in instruments_used
-    ]
 
-    console.print(f"\n[bold]Destroying stack[/bold] [cyan]{name}[/cyan] (audience : {audience})\n")
+    console.print(f"\n[bold]Destroying stack[/bold] [cyan]{name}[/cyan]\n")
 
-    if not csv_files and not fichiers_dirs and not state_keys:
+    if not data_dir.exists() and not state_file.exists():
         console.print("[yellow]Rien à supprimer pour ce stack.[/yellow]")
         return
 
     console.print("  Sera supprimé :")
-    for p in csv_files:
-        console.print(f"    [red]-[/red] {p}")
-    for d in fichiers_dirs:
-        console.print(f"    [red]-[/red] {d}/")
-    for k in state_keys:
-        console.print(f"    [red]-[/red] état REDCap : {k}")
+    if data_dir.exists():
+        console.print(f"    [red]-[/red] {data_dir}/ (données + state + backup)")
     if state_file.exists():
         console.print(f"    [red]-[/red] {state_file}")
     console.print()
@@ -1040,16 +988,10 @@ def destroy(
     if not yes:
         typer.confirm("Confirmer la destruction ?", abort=True)
 
-    for p in csv_files:
-        p.unlink(missing_ok=True)
-    for d in fichiers_dirs:
-        shutil.rmtree(d, ignore_errors=True)
-    for k in state_keys:
-        del redcap_state[k]
-    save_redcap_state(redcap_state)
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
     if state_file.exists():
         state_file.unlink()
-    UP_IN_PROGRESS_FILE.unlink(missing_ok=True)
 
     console.print(f"[green]✓[/green] Stack [cyan]{name}[/cyan] détruit.\n")
 
@@ -1064,15 +1006,15 @@ def state() -> None:
     """Affiche l'état courant (stack actif + données REDCap)."""
     name = require_active_stack()
     cfg = load_stack_config(name)
-    audience = cfg.get("rapport", {}).get("audience", "public")
+    audience = cfg.get("audience", "public")
 
     st = load_json(stack_state_path(name))
-    redcap_state = load_redcap_state()
+    redcap_state = load_redcap_state(name)
 
     console.print(f"\n[bold]Stack actif :[/bold] [cyan]{name}[/cyan]")
     if st:
         console.print(f"  Dernier up : {st.get('last_up', '—')[:19]}")
-        console.print(f"  Output     : {st.get('output', '—')}")
+        console.print(f"  Données    : {stack_data_dir(name)}")
     else:
         console.print("  [yellow]Jamais exécuté.[/yellow]")
 

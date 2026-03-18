@@ -340,18 +340,20 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
     instruments_path = meta_dir / "instruments.json"
 
     # Toujours télécharger les métadonnées, mais ne signaler le changement que si le SHA-256 diffère
+    dict_path = meta_dir / "dictionnaire.csv"
     old_hashes = {
         "metadata.json": redcap_state.get("_metadata", {}).get("metadata.json", ""),
         "instruments.json": redcap_state.get("_metadata", {}).get("instruments.json", ""),
+        "dictionnaire.csv": redcap_state.get("_metadata", {}).get("dictionnaire.csv", ""),
     }
     run_r_task("fetch_metadata.R", {**api_cfg, "metadata_dir": str(meta_dir)})
     new_hashes = {
         "metadata.json": sha256_file(metadata_path) if metadata_path.exists() else "",
         "instruments.json": sha256_file(instruments_path) if instruments_path.exists() else "",
+        "dictionnaire.csv": sha256_file(dict_path) if dict_path.exists() else "",
     }
     if new_hashes != old_hashes:
-        redcap_state["_metadata"] = {"metadata.json": new_hashes["metadata.json"],
-                                     "instruments.json": new_hashes["instruments.json"]}
+        redcap_state["_metadata"] = new_hashes
         save_redcap_state(stack_name, redcap_state)
         if any(old_hashes.values()):
             console.print("  [yellow]~[/yellow] Métadonnées REDCap modifiées — structure mise à jour")
@@ -832,6 +834,11 @@ def refresh() -> None:
     console.print("  [green]✓[/green] Métadonnées mises à jour")
 
     redcap_state = load_redcap_state(name)
+    meta_files = ["metadata.json", "instruments.json", "dictionnaire.csv"]
+    redcap_state["_metadata"] = {
+        f: sha256_file(meta_dir / f) for f in meta_files if (meta_dir / f).exists()
+    }
+    save_redcap_state(name, redcap_state)
     updated = 0
     for key, inst_state in redcap_state.items():
         if not key.endswith(f"__{audience}"):

@@ -145,17 +145,10 @@ download_instrument_data <- function(
   non_identifiers <- split_res$non_identifiers
   all_form_fields <- get_form_fields(metadata, config$name)
 
-  data_fields <- if (config$has_identifiers) non_identifiers else all_form_fields
-  name_fields <- c("last_name", "first_name", "middle_name")
-
-  # Colonnes communes à tous les CSV (ordre fixe : userid, hashed_id, puis tous les champs)
-  all_csv_fields <- if (config$has_identifiers) {
-    c(id_field, "hashed_id", identifiers, non_identifiers)
-  } else {
-    c(id_field, "hashed_id", name_fields, all_form_fields)
-  }
+  # Colonnes communes à tous les CSV (ordre du formulaire REDCap)
+  all_csv_fields <- c(id_field, "hashed_id", all_form_fields)
   # Champs nominatifs obfusqués dans pseudo/anon
-  nominative_fields <- c(id_field, if (config$has_identifiers) identifiers else name_fields)
+  nominative_fields <- c(id_field, if (config$has_identifiers) identifiers else character(0))
   # Champs obfusqués dans anonymisés (nominatifs + hashed_id)
   anon_obfuscate <- c(nominative_fields, "hashed_id")
 

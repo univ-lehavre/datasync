@@ -50,7 +50,9 @@ normalize_image_dpi <- function(image_path) {
 # ---------------------------------------------------------------------------
 # Écriture CSV d'un instrument
 # ---------------------------------------------------------------------------
-write_instrument_csv <- function(path, records, fields, id_field, include_hashed_id = FALSE) {
+write_instrument_csv <- function(path, records, fields, id_field,
+                                 include_hashed_id = FALSE,
+                                 obfuscate_fields = character(0)) {
   if (is.null(records) || nrow(records) == 0) {
     return(invisible(NULL))
   }
@@ -59,7 +61,9 @@ write_instrument_csv <- function(path, records, fields, id_field, include_hashed
     row <- character(length(fields))
     for (j in seq_along(fields)) {
       f <- fields[j]
-      if (f == "hashed_id" && include_hashed_id) {
+      if (f %in% obfuscate_fields) {
+        row[j] <- "***"
+      } else if (f == "hashed_id" && include_hashed_id) {
         row[j] <- if (id_field %in% names(records)) hash_id(as.character(records[[id_field]][i])) else ""
       } else {
         val <- if (f %in% names(records)) as.character(records[[f]][i]) else ""
@@ -142,6 +146,17 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   data_fields <- if (config$has_identifiers) non_identifiers else all_form_fields
   name_fields <- c("last_name", "first_name", "middle_name")
 
+  # Colonnes communes à tous les CSV (ordre fixe : userid, hashed_id, puis tous les champs)
+  all_csv_fields <- if (config$has_identifiers) {
+    c(id_field, "hashed_id", identifiers, non_identifiers)
+  } else {
+    c(id_field, "hashed_id", name_fields, all_form_fields)
+  }
+  # Champs nominatifs obfusqués dans pseudo/anon
+  nominative_fields <- c(id_field, if (config$has_identifiers) identifiers else name_fields)
+  # Champs obfusqués dans anonymisés (nominatifs + hashed_id)
+  anon_obfuscate <- c(nominative_fields, "hashed_id")
+
   # 1. Champs de contrôle pour classifier les participants
   control_fields <- c(id_field, config$id_level_field, config$audience_field)
   control_records <- get_records_with_fields_raw(api_url, token, control_fields)
@@ -192,14 +207,11 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
     }
   }
 
+  # Champs complets à télécharger (nominatifs + données)
+  fields_to_download <- unique(c(id_field, setdiff(all_csv_fields, "hashed_id")))
+
   # 2. Identifiables
   if (length(ident_ids) > 0) {
-    fields_to_download <- if (config$has_identifiers) {
-      c(id_field, identifiers, non_identifiers)
-    } else {
-      c(id_field, name_fields, all_form_fields)
-    }
-
     records <- tryCatch(
       get_records_with_fields_and_ids(api_url, token, fields_to_download, ident_ids),
       error = function(e) {
@@ -207,23 +219,13 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
         NULL
       }
     )
-
     if (!is.null(records) && nrow(records) > 0) {
-      csv_fields <- if (config$has_identifiers) {
-        c(id_field, "hashed_id", identifiers, non_identifiers)
-      } else {
-        c(id_field, "hashed_id", name_fields, all_form_fields)
-      }
-      csv_path <- file.path(data_dir, "identifiables.csv")
-      write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = TRUE)
       result$ident_records <- records
     }
   }
 
-  # 3. Pseudonymisés (= pseudo propres + identifiables dépseudonymisés)
+  # 3. Pseudonymisés
   if (length(pseudo_ids) > 0) {
-    fields_to_download <- c(id_field, data_fields)
-
     records <- tryCatch(
       get_records_with_fields_and_ids(api_url, token, fields_to_download, pseudo_ids),
       error = function(e) {
@@ -231,34 +233,13 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
         NULL
       }
     )
-
     if (!is.null(records) && nrow(records) > 0) {
       result$pseudo_records <- records
     }
   }
 
-  # Écriture pseudonymisés : pseudo + identifiables (sans données nominatives)
-  keep_fields <- c(id_field, data_fields)
-  pseudo_rows <- list()
-  if (!is.null(result$pseudo_records) && nrow(result$pseudo_records) > 0) {
-    cols <- intersect(names(result$pseudo_records), keep_fields)
-    pseudo_rows <- c(pseudo_rows, list(result$pseudo_records[, cols, drop = FALSE]))
-  }
-  if (!is.null(result$ident_records) && nrow(result$ident_records) > 0) {
-    cols <- intersect(names(result$ident_records), keep_fields)
-    pseudo_rows <- c(pseudo_rows, list(result$ident_records[, cols, drop = FALSE]))
-  }
-  if (length(pseudo_rows) > 0) {
-    pseudo_combined <- do.call(rbind, pseudo_rows)
-    csv_fields_pseudo <- c("hashed_id", data_fields)
-    csv_path <- file.path(data_dir, "pseudonymises.csv")
-    write_instrument_csv(csv_path, pseudo_combined, csv_fields_pseudo, id_field, include_hashed_id = TRUE)
-  }
-
-  # 4. Anonymisés (= anon propres + pseudo + identifiables, sans données nominatives)
+  # 4. Anonymisés
   if (length(anon_ids) > 0) {
-    fields_to_download <- c(id_field, data_fields)
-
     records <- tryCatch(
       get_records_with_fields_and_ids(api_url, token, fields_to_download, anon_ids),
       error = function(e) {
@@ -266,23 +247,44 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
         NULL
       }
     )
-
     if (!is.null(records) && nrow(records) > 0) {
       result$anon_records <- records
     }
   }
 
-  # Écriture anonymisés : anon + pseudo + identifiables (sans données nominatives, sans hashed_id)
+  # Écriture identifiables : toutes les colonnes, aucune obfuscation
+  if (!is.null(result$ident_records) && nrow(result$ident_records) > 0) {
+    csv_path <- file.path(data_dir, "identifiables.csv")
+    write_instrument_csv(
+      csv_path, result$ident_records, all_csv_fields, id_field,
+      include_hashed_id = TRUE
+    )
+  }
+
+  # Écriture pseudonymisés : pseudo + identifiables, nominatifs obfusqués
+  pseudo_rows <- list()
+  for (r in list(result$pseudo_records, result$ident_records)) {
+    if (!is.null(r) && nrow(r) > 0) pseudo_rows <- c(pseudo_rows, list(r))
+  }
+  if (length(pseudo_rows) > 0) {
+    csv_path <- file.path(data_dir, "pseudonymises.csv")
+    write_instrument_csv(
+      csv_path, do.call(rbind, pseudo_rows), all_csv_fields, id_field,
+      include_hashed_id = TRUE, obfuscate_fields = nominative_fields
+    )
+  }
+
+  # Écriture anonymisés : anon + pseudo + identifiables, nominatifs + hashed_id obfusqués
   anon_rows <- list()
   for (r in list(result$anon_records, result$pseudo_records, result$ident_records)) {
-    if (!is.null(r) && nrow(r) > 0) {
-      anon_rows <- c(anon_rows, list(r[, intersect(names(r), c(id_field, data_fields)), drop = FALSE]))
-    }
+    if (!is.null(r) && nrow(r) > 0) anon_rows <- c(anon_rows, list(r))
   }
   if (length(anon_rows) > 0) {
-    anon_combined <- do.call(rbind, anon_rows)
     csv_path <- file.path(data_dir, "anonymises.csv")
-    write_instrument_csv(csv_path, anon_combined, data_fields, id_field, include_hashed_id = FALSE)
+    write_instrument_csv(
+      csv_path, do.call(rbind, anon_rows), all_csv_fields, id_field,
+      include_hashed_id = TRUE, obfuscate_fields = anon_obfuscate
+    )
   }
 
   # 5. Agrégés

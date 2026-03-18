@@ -860,11 +860,11 @@ def up() -> None:
                 output_dir = inst_data_dir / f"nlp-{field}"
                 output_dir.mkdir(parents=True, exist_ok=True)
                 profile_inst = next(
-                    (i for i in all_instruments if "researcher_profile" in i["name"]),
+                    (i for i in all_instruments if "researcher_profile" in i.get("instrument_name", "")),
                     None,
                 )
                 profile_ident = (
-                    stack_instrument_dir(stack_name, profile_inst["name"]) / "identifiables.csv"
+                    stack_instrument_dir(stack_name, profile_inst["instrument_name"]) / "identifiables.csv"
                     if profile_inst
                     else None
                 )

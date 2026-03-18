@@ -4,7 +4,7 @@
 # "public"      → participants ayant choisi "General public"
 # "chercheurs"  → tous les participants (filtre audience respecté)
 # "admin"       → tous les participants sans filtre (toutes les données)
-audience: chercheurs
+audience: admin
 
 # Instruments à inclure
 # "auto"  → détection automatique depuis REDCap

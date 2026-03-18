@@ -22,7 +22,5 @@ bin/
 
 # macOS
 .DS_Store
-rapport-analyse-premiere-vague.qmd
 .Rhistory
-ecrin
-ECRINV1_DATA_2026-03-18_0954.csv
+ECRINV1_DATA_*.csv

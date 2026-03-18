@@ -71,15 +71,18 @@ load_and_filter_texts <- function(csv_path, field, id_field) {
   vals <- as.character(df[[field]])
   keep <- !is.na(vals) & vals != "" & vals != "NA" & vals != "***"
   df <- df[keep, , drop = FALSE]
-  result <- data.frame(
-    id = as.character(df[[id_field]]),
+  # Utilise hashed_id si disponible et non obfusqué, sinon id_field
+  id_col <- if ("hashed_id" %in% names(df)) {
+    hids <- as.character(df[["hashed_id"]])
+    if (all(hids == "***" | is.na(hids))) id_field else "hashed_id"
+  } else {
+    id_field
+  }
+  data.frame(
+    id = as.character(df[[id_col]]),
     text = as.character(df[[field]]),
     stringsAsFactors = FALSE
   )
-  if ("hashed_id" %in% names(df)) {
-    result$hashed_id <- as.character(df[["hashed_id"]])
-  }
-  result
 }
 
 # ---------------------------------------------------------------------------

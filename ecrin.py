@@ -828,14 +828,14 @@ def up() -> None:
             e for e in (cfg.get("nlp_fields") or [])
             if e["instrument"] == inst["name"]
         ]
-        anon_csv = inst_data_dir / "anonymises.csv"
-        if nlp_entries and anon_csv.exists():
+        pseudo_csv = inst_data_dir / "pseudonymises.csv"
+        if nlp_entries and pseudo_csv.exists():
             for entry in nlp_entries:
                 field = entry["field"]
                 output_dir = inst_data_dir / f"nlp-{field}"
                 output_dir.mkdir(parents=True, exist_ok=True)
                 nlp_task = {
-                    "csv_path": str(anon_csv),
+                    "csv_path": str(pseudo_csv),
                     "field": field,
                     "id_field": metadata[0]["field_name"] if metadata else "record_id",
                     "output_dir": str(output_dir),

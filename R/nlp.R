@@ -108,90 +108,62 @@ tokenize_group <- function(df_lang, lang_code, output_dir) {
   model <- load_udpipe_model(lang_code)
   use_udpipe <- !is.null(model)
 
-  # --- Étape 1 : annotation complète ---
+  # --- Étape 1 : annotation complète → toutes les occurrences ---
+  upos_keep <- c("NOUN", "VERB", "ADJ", "ADV", "PROPN")
   if (use_udpipe) {
     ann <- udpipe::udpipe_annotate(model, x = df_lang$text, doc_id = df_lang$id)
     ann_df <- as.data.frame(ann, detailed = FALSE)
-    # Toutes les annotations avec indicateur de rétention UPOS
-    upos_keep <- c("NOUN", "VERB", "ADJ", "ADV", "PROPN")
-    ann_full <- data.frame(
+    pipeline <- data.frame(
       id = ann_df$doc_id,
       token = tolower(ann_df$token),
       lemma = tolower(ann_df$lemma),
       upos = ann_df$upos,
-      upos_retenu = ann_df$upos %in% upos_keep,
+      lemmatise = tolower(ann_df$token) != tolower(ann_df$lemma),
       stringsAsFactors = FALSE
     )
-    write_csv(ann_full, file.path(output_dir, "01_annotation.csv"))
-
-    # Transformations token → lemme uniquement
-    lemmatises <- ann_full[
-      ann_full$upos_retenu & ann_full$token != ann_full$lemma,
-      c("id", "token", "lemma", "upos"),
-      drop = FALSE
-    ]
-    write_csv(lemmatises, file.path(output_dir, "01b_lemmatisation.csv"))
-
-    tokens_raw <- ann_full[ann_full$upos_retenu, c("id", "token", "lemma", "upos"), drop = FALSE]
   } else {
-    tokens_raw <- tidytext::unnest_tokens(df_lang, token, text, token = "words")
-    tokens_raw$lemma <- tokens_raw$token
-    tokens_raw$upos <- NA_character_
-    write_csv(tokens_raw[, c("id", "token", "lemma", "upos")], file.path(output_dir, "01_annotation.csv"))
+    toks <- tidytext::unnest_tokens(df_lang, token, text, token = "words")
+    pipeline <- data.frame(
+      id = toks$id,
+      token = toks$token,
+      lemma = toks$token,
+      upos = NA_character_,
+      lemmatise = FALSE,
+      stringsAsFactors = FALSE
+    )
   }
 
-  # --- Étape 2 : suppression stop-words (sur le lemme) ---
-  if (lang_code %in% c("fr", "en")) {
-    sw <- stopwords::stopwords(lang_code, source = "snowball")
-    mask_sw <- tokens_raw$lemma %in% sw
-    write_csv(tokens_raw[mask_sw, , drop = FALSE], file.path(output_dir, "02_stopwords_supprimes.csv"))
-    tokens_sw <- tokens_raw[!mask_sw, , drop = FALSE]
+  # Colonnes de décision cumulées — FALSE = conservé, TRUE = éliminé
+  pipeline$sup_upos <- if (use_udpipe) !(pipeline$upos %in% upos_keep) else FALSE
+  sw <- if (lang_code %in% c("fr", "en")) stopwords::stopwords(lang_code, source = "snowball") else character(0L)
+  pipeline$sup_stopword <- !pipeline$sup_upos & (pipeline$lemma %in% sw)
+  pipeline$sup_min_chars <- !pipeline$sup_upos & !pipeline$sup_stopword & (nchar(pipeline$lemma) < 3L)
+
+  # Hapax calculé uniquement sur les tokens qui survivent aux 3 filtres précédents
+  survivants <- pipeline[!pipeline$sup_upos & !pipeline$sup_stopword & !pipeline$sup_min_chars, ]
+  if (nrow(survivants) > 0L) {
+    doc_freq <- tapply(survivants$id, survivants$lemma, function(x) length(unique(x)))
+    hapax_lemmes <- names(doc_freq)[doc_freq == 1L]
   } else {
-    write_csv(
-      data.frame(id = character(), token = character(), lemma = character(), upos = character()),
-      file.path(output_dir, "02_stopwords_supprimes.csv")
-    )
-    tokens_sw <- tokens_raw
+    hapax_lemmes <- character(0L)
   }
-  write_csv(tokens_sw, file.path(output_dir, "02_apres_stopwords.csv"))
+  pipeline$sup_hapax <- !pipeline$sup_upos & !pipeline$sup_stopword &
+    !pipeline$sup_min_chars & (pipeline$lemma %in% hapax_lemmes)
 
-  # --- Étape 3 : longueur minimale (sur le lemme) ---
-  mask_len <- nchar(tokens_sw$lemma) < 3L
-  write_csv(tokens_sw[mask_len, , drop = FALSE], file.path(output_dir, "03_min_chars_supprimes.csv"))
-  tokens_len <- tokens_sw[!mask_len, , drop = FALSE]
-  write_csv(tokens_len, file.path(output_dir, "03_apres_min_chars.csv"))
+  pipeline$retenu <- !pipeline$sup_upos & !pipeline$sup_stopword &
+    !pipeline$sup_min_chars & !pipeline$sup_hapax
 
-  if (nrow(tokens_len) == 0L) {
-    empty <- data.frame(id = character(), token = character(), stringsAsFactors = FALSE)
-    write_csv(
-      data.frame(id = character(), token = character()),
-      file.path(output_dir, "04_hapax_supprimes.csv")
-    )
-    write_csv(empty, file.path(output_dir, "04_lemmes_finaux.csv"))
-    return(empty)
-  }
+  # Export unique : maturation complète, une ligne par occurrence
+  write_csv(pipeline, file.path(output_dir, "02_filtrage.csv"))
 
-  # --- Étape 4 : réduction aux lemmes ---
-  tokens_lemmes <- data.frame(
-    id = tokens_len$id,
-    token = tokens_len$lemma,
+  tokens_finaux <- data.frame(
+    id = pipeline$id[pipeline$retenu],
+    token = pipeline$lemma[pipeline$retenu],
     stringsAsFactors = FALSE
   )
+  write_csv(tokens_finaux, file.path(output_dir, "03_lemmes_finaux.csv"))
 
-  # --- Étape 5 : suppression hapax ---
-  doc_freq <- tapply(tokens_lemmes$id, tokens_lemmes$token, function(x) length(unique(x)))
-  shared <- names(doc_freq)[doc_freq > 1L]
-  hapax <- names(doc_freq)[doc_freq == 1L]
-  write_csv(
-    tokens_lemmes[tokens_lemmes$token %in% hapax, , drop = FALSE],
-    file.path(output_dir, "04_hapax_supprimes.csv")
-  )
-  if (length(shared) > 0L) {
-    tokens_lemmes <- tokens_lemmes[tokens_lemmes$token %in% shared, , drop = FALSE]
-  }
-  write_csv(tokens_lemmes, file.path(output_dir, "04_lemmes_finaux.csv"))
-
-  tokens_lemmes[, c("id", "token"), drop = FALSE]
+  tokens_finaux
 }
 
 # ---------------------------------------------------------------------------

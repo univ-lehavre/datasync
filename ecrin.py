@@ -420,12 +420,14 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
 
         # 3. Changements REDCap via dateRangeBegin
         downloaded_at = inst_state.get("downloaded_at", "")
+        # REDCap attend "YYYY-MM-DD HH:MM:SS" (espace, pas T)
+        date_range_begin = downloaded_at.replace("T", " ") if downloaded_at else ""
         task = {
             **api_cfg,
             "id_field": id_field,
             "id_level_field": inst["id_level_field"],
             "audience_field": inst["audience_field"],
-            "date_range_begin": downloaded_at,
+            "date_range_begin": date_range_begin,
         }
         result = run_r_task("fetch_control.R", task)
         if result.get("has_changes"):
@@ -656,7 +658,7 @@ def up() -> None:
         raise typer.Exit(1)
 
     redcap_state = load_redcap_state(name)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     up_id = make_up_id()
 
     instruments_to_download = [

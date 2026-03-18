@@ -39,7 +39,6 @@ from rich.table import Table
 STACKS_DIR = Path("stacks")
 ECRIN_DIR = Path(".ecrin")
 ACTIVE_STACK_FILE = ECRIN_DIR / "active-stack"
-DOWNLOADS_DIR = Path("downloads")
 SCHEMA_VERSION = 1
 
 app = typer.Typer(help="Orchestrateur déclaratif ECRIN", no_args_is_help=True)
@@ -55,7 +54,7 @@ console = Console()
 
 
 def stack_data_dir(name: str) -> Path:
-    return DOWNLOADS_DIR / name
+    return ECRIN_DIR / name
 
 
 def stack_metadata_dir(name: str) -> Path:
@@ -137,7 +136,7 @@ def load_stack_config(name: str) -> dict:
 
 
 def stack_state_path(name: str) -> Path:
-    return STACKS_DIR / f"{name}.state.json"
+    return stack_data_dir(name) / "state.json"
 
 
 # ---------------------------------------------------------------------------

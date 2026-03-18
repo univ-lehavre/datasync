@@ -1,0 +1,18 @@
+# Stack ECRIN — 2026-03-18
+
+# Audience cible
+# "public"      → participants ayant choisi "General public"
+# "chercheurs"  → tous les participants (filtre audience respecté)
+# "admin"       → tous les participants sans filtre (toutes les données)
+audience: "admin"
+
+# Instruments à inclure
+# "auto"  → détection automatique depuis REDCap
+#           (tous les instruments ayant {instrument}_identification_level)
+# liste   → sélection manuelle par nom technique REDCap
+instruments: auto
+# instruments:
+#   - profils_chercheurs
+#   - questions_recherche
+#   - publications
+#   - propositions_projets

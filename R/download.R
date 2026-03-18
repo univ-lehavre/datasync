@@ -171,7 +171,8 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
       next
     }
 
-    if (audience == "public" && (is.na(data_audience) || !grepl("General public", data_audience, fixed = TRUE))) {
+    not_public_audience <- is.na(data_audience) || !grepl("General public", data_audience, fixed = TRUE)
+    if (audience == "public" && not_public_audience) {
       result$stats$audience_filtered <- result$stats$audience_filtered + 1L
       next
     }

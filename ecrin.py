@@ -457,7 +457,8 @@ NEW_STACK_TEMPLATE = """\
 
 # Audience cible
 # "public"      → participants ayant choisi "General public"
-# "chercheurs"  → tous les participants
+# "chercheurs"  → tous les participants (filtre audience respecté)
+# "admin"       → tous les participants sans filtre (toutes les données)
 audience: "{audience}"
 
 # Instruments à inclure

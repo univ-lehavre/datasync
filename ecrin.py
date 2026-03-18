@@ -394,16 +394,18 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
         inst_state = redcap_state.get(key)
         expected_csvs = compute_expected_csv_files(inst["name"], data_dir)
 
-        # 1. Vérifier intégrité des fichiers existants
+        # 1. Vérifier intégrité des fichiers existants (CSV + binaires)
         if inst_state and inst_state.get("files"):
             corrupted_files = []
-            for csv_path in expected_csvs:
-                rel = csv_path.name
-                expected_hash = inst_state["files"].get(rel)
-                if expected_hash and csv_path.exists():
-                    if sha256_file(csv_path) != expected_hash:
+            for rel, expected_hash in inst_state["files"].items():
+                if rel.startswith("fichiers/"):
+                    full_path = data_dir / rel
+                else:
+                    full_path = data_dir / rel
+                if full_path.exists():
+                    if sha256_file(full_path) != expected_hash:
                         corrupted_files.append(rel)
-                elif expected_hash and not csv_path.exists():
+                else:
                     corrupted_files.append(f"{rel} (manquant)")
             if corrupted_files:
                 diff.append({
@@ -730,12 +732,18 @@ def up() -> None:
                     f"    [green]✓[/green] {file_result.get('n_files', 0)} fichier(s) téléchargé(s)"
                 )
 
-        # Vérification SHA-256 des fichiers écrits
+        # Vérification SHA-256 — CSV
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
             for csv_path in compute_expected_csv_files(inst["name"], data_dir)
             if csv_path.exists()
         }
+        # Vérification SHA-256 — fichiers binaires
+        bin_dir = data_dir / "fichiers" / inst["name"]
+        if bin_dir.exists():
+            for bin_path in sorted(bin_dir.iterdir()):
+                if bin_path.is_file():
+                    file_hashes[f"fichiers/{inst['name']}/{bin_path.name}"] = sha256_file(bin_path)
 
         redcap_state[key] = {
             "downloaded_at": now,
@@ -821,6 +829,11 @@ def refresh() -> None:
             for csv_path in compute_expected_csv_files(inst_name, data_dir)
             if csv_path.exists()
         }
+        bin_dir = data_dir / "fichiers" / inst_name
+        if bin_dir.exists():
+            for bin_path in sorted(bin_dir.iterdir()):
+                if bin_path.is_file():
+                    file_hashes[f"fichiers/{inst_name}/{bin_path.name}"] = sha256_file(bin_path)
         if file_hashes != inst_state.get("files", {}):
             redcap_state[key]["files"] = file_hashes
             updated += 1

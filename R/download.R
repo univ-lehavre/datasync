@@ -84,7 +84,6 @@ download_instrument_files <- function(
     return(character(0))
   }
 
-  files_dir <- file.path(files_dir, config$name)
   dir_create(files_dir, recurse = TRUE)
 
   downloaded <- character(0)
@@ -215,7 +214,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
       } else {
         c(id_field, "hashed_id", name_fields, all_form_fields)
       }
-      csv_path <- file.path(data_dir, sprintf("%s_identifiables.csv", config$name))
+      csv_path <- file.path(data_dir, "identifiables.csv")
       write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = TRUE)
       result$ident_records <- records
     }
@@ -252,7 +251,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   if (length(pseudo_rows) > 0) {
     pseudo_combined <- do.call(rbind, pseudo_rows)
     csv_fields_pseudo <- c("hashed_id", data_fields)
-    csv_path <- file.path(data_dir, sprintf("%s_pseudonymises.csv", config$name))
+    csv_path <- file.path(data_dir, "pseudonymises.csv")
     write_instrument_csv(csv_path, pseudo_combined, csv_fields_pseudo, id_field, include_hashed_id = TRUE)
   }
 
@@ -282,7 +281,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   }
   if (length(anon_rows) > 0) {
     anon_combined <- do.call(rbind, anon_rows)
-    csv_path <- file.path(data_dir, sprintf("%s_anonymises.csv", config$name))
+    csv_path <- file.path(data_dir, "anonymises.csv")
     write_instrument_csv(csv_path, anon_combined, data_fields, id_field, include_hashed_id = FALSE)
   }
 
@@ -294,7 +293,7 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
   # 6. Export CSV statistiques
   n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
   if (n_stats > 0) {
-    csv_path <- file.path(data_dir, sprintf("%s_statistiques.csv", config$name))
+    csv_path <- file.path(data_dir, "statistiques.csv")
     stats_df <- data.frame(
       categorie = c("sans_reponse", "filtre_audience", "agreges", "total"),
       nombre = c(

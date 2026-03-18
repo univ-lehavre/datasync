@@ -61,8 +61,8 @@ def stack_downloads_dir(name: str) -> Path:
     return stack_root_dir(name) / "downloads"
 
 
-def stack_data_dir(name: str) -> Path:
-    return stack_downloads_dir(name) / "data"
+def stack_instrument_dir(stack_name: str, instrument_name: str) -> Path:
+    return stack_downloads_dir(stack_name) / instrument_name
 
 
 def stack_metadata_dir(name: str) -> Path:
@@ -233,10 +233,10 @@ def instrument_state_key(instrument_name: str, audience: str) -> str:
 
 def compute_expected_csv_files(instrument_name: str, data_dir: Path) -> list[Path]:
     return [
-        data_dir / f"{instrument_name}_identifiables.csv",
-        data_dir / f"{instrument_name}_pseudonymises.csv",
-        data_dir / f"{instrument_name}_anonymises.csv",
-        data_dir / f"{instrument_name}_statistiques.csv",
+        data_dir / "identifiables.csv",
+        data_dir / "pseudonymises.csv",
+        data_dir / "anonymises.csv",
+        data_dir / "statistiques.csv",
     ]
 
 
@@ -252,12 +252,14 @@ def backup_current_state(stack_name: str, up_id: str, instruments: list[str]) ->
     """Copie les CSV existants et le state REDCap dans .backup/ avant écrasement."""
     bkp_dir = backup_dir(stack_name)
     bkp_dir.mkdir(parents=True, exist_ok=True)
-    data_dir = stack_data_dir(stack_name)
 
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name, data_dir):
+        inst_data_dir = stack_instrument_dir(stack_name, inst_name)
+        inst_bkp_dir = bkp_dir / inst_name
+        inst_bkp_dir.mkdir(parents=True, exist_ok=True)
+        for csv_path in compute_expected_csv_files(inst_name, inst_data_dir):
             if csv_path.exists():
-                shutil.copy2(csv_path, bkp_dir / csv_path.name)
+                shutil.copy2(csv_path, inst_bkp_dir / csv_path.name)
 
     state_file = redcap_state_file(stack_name)
     if state_file.exists():
@@ -279,11 +281,13 @@ def restore_backup(stack_name: str) -> bool:
 
     meta = load_json(meta_path)
     instruments = meta.get("instruments", [])
-    data_dir = stack_data_dir(stack_name)
 
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name, data_dir):
-            backup_csv = bkp_dir / csv_path.name
+        inst_data_dir = stack_instrument_dir(stack_name, inst_name)
+        inst_data_dir.mkdir(parents=True, exist_ok=True)
+        inst_bkp_dir = bkp_dir / inst_name
+        for csv_path in compute_expected_csv_files(inst_name, inst_data_dir):
+            backup_csv = inst_bkp_dir / csv_path.name
             if backup_csv.exists():
                 shutil.copy2(backup_csv, csv_path)
             elif csv_path.exists():
@@ -330,7 +334,6 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
     Chaque entrée : { "instrument": {...}, "action": "ok"|"new"|"modified"|"corrupted", "reason": "..." }
     """
     redcap_state = load_redcap_state(stack_name)
-    data_dir = stack_data_dir(stack_name)
     meta_dir = stack_metadata_dir(stack_name)
 
     metadata_path = meta_dir / "metadata.json"
@@ -400,17 +403,17 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
     for inst in detected:
         key = instrument_state_key(inst["name"], audience)
         inst_state = redcap_state.get(key)
-        expected_csvs = compute_expected_csv_files(inst["name"], data_dir)
+        inst_data_dir = stack_instrument_dir(stack_name, inst["name"])
+        expected_csvs = compute_expected_csv_files(inst["name"], inst_data_dir)
 
         # 1. Vérifier intégrité des fichiers existants (CSV + binaires)
-        downloads_dir = stack_downloads_dir(stack_name)
         if inst_state and inst_state.get("files"):
             corrupted_files = []
             for rel, expected_hash in inst_state["files"].items():
                 if rel.startswith("files/"):
-                    full_path = downloads_dir / rel
+                    full_path = inst_data_dir / rel
                 else:
-                    full_path = data_dir / rel
+                    full_path = inst_data_dir / rel
                 if full_path.exists():
                     if sha256_file(full_path) != expected_hash:
                         corrupted_files.append(rel)
@@ -656,8 +659,6 @@ def up() -> None:
     api_cfg = get_api_config()
 
     audience = cfg.get("audience", "public")
-    data_dir = stack_data_dir(name)
-    data_dir.mkdir(parents=True, exist_ok=True)
 
     interrupted = check_interrupted_up(name)
     if interrupted:
@@ -717,25 +718,28 @@ def up() -> None:
         console.print(f"  {symbol} {inst['label']:<35} {reason_str}")
         console.print(f"    téléchargement en cours...")
 
+        inst_data_dir = stack_instrument_dir(name, inst["name"])
+        inst_data_dir.mkdir(parents=True, exist_ok=True)
+
         task = {
             **api_cfg,
             "audience": audience,
             "instrument": inst,
             "metadata_path": str(metadata_path),
-            "data_dir": str(data_dir),
+            "data_dir": str(inst_data_dir),
         }
         dl_result = run_r_task("download_instrument.R", task)
 
         if inst.get("file_fields") and dl_result.get("n_ident", 0) > 0:
-            ident_csv = data_dir / f"{inst['name']}_identifiables.csv"
+            ident_csv = inst_data_dir / "identifiables.csv"
             if ident_csv.exists():
                 file_task = {
                     **api_cfg,
                     "ident_csv_path": str(ident_csv),
                     "instrument": inst,
                     "metadata_path": str(metadata_path),
-                    "data_dir": str(data_dir),
-                    "files_dir": str(stack_downloads_dir(name) / "files"),
+                    "data_dir": str(inst_data_dir),
+                    "files_dir": str(inst_data_dir / "files"),
                 }
                 file_result = run_r_task("download_files.R", file_task)
                 console.print(
@@ -745,16 +749,15 @@ def up() -> None:
         # Vérification SHA-256 — CSV
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
-            for csv_path in compute_expected_csv_files(inst["name"], data_dir)
+            for csv_path in compute_expected_csv_files(inst["name"], inst_data_dir)
             if csv_path.exists()
         }
         # Vérification SHA-256 — fichiers binaires
-        downloads_dir = stack_downloads_dir(name)
-        bin_dir = downloads_dir / "files" / inst["name"]
+        bin_dir = inst_data_dir / "files"
         if bin_dir.exists():
             for bin_path in sorted(bin_dir.iterdir()):
                 if bin_path.is_file():
-                    file_hashes[f"files/{inst['name']}/{bin_path.name}"] = sha256_file(bin_path)
+                    file_hashes[f"files/{bin_path.name}"] = sha256_file(bin_path)
 
         redcap_state[key] = {
             "downloaded_at": now,
@@ -805,7 +808,7 @@ def up() -> None:
     })
 
     console.print(f"\n[green]✓[/green] [bold]Stack[/bold] [cyan]{name}[/cyan] [bold]à jour.[/bold]")
-    console.print(f"  Données dans : [cyan]{data_dir}[/cyan]\n")
+    console.print(f"  Données dans : [cyan]{stack_downloads_dir(name)}[/cyan]\n")
 
 
 # ---------------------------------------------------------------------------
@@ -820,7 +823,6 @@ def refresh() -> None:
     cfg = load_stack_config(name)
     api_cfg = get_api_config()
     audience = cfg.get("audience", "public")
-    data_dir = stack_data_dir(name)
 
     console.print(f"\n[bold]Refreshing stack[/bold] [cyan]{name}[/cyan]\n")
 
@@ -835,16 +837,17 @@ def refresh() -> None:
         if not key.endswith(f"__{audience}"):
             continue
         inst_name = key.replace(f"__{audience}", "")
+        inst_dir = stack_instrument_dir(name, inst_name)
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
-            for csv_path in compute_expected_csv_files(inst_name, data_dir)
+            for csv_path in compute_expected_csv_files(inst_name, inst_dir)
             if csv_path.exists()
         }
-        bin_dir = stack_downloads_dir(name) / "files" / inst_name
+        bin_dir = inst_dir / "files"
         if bin_dir.exists():
             for bin_path in sorted(bin_dir.iterdir()):
                 if bin_path.is_file():
-                    file_hashes[f"files/{inst_name}/{bin_path.name}"] = sha256_file(bin_path)
+                    file_hashes[f"files/{bin_path.name}"] = sha256_file(bin_path)
         if file_hashes != inst_state.get("files", {}):
             redcap_state[key]["files"] = file_hashes
             updated += 1
@@ -919,13 +922,13 @@ def rollback(
     backed_up_at = meta.get("backed_up_at", "—")[:19]
     up_id = meta.get("up_id", "—")
     instruments = meta.get("instruments", [])
-    data_dir = stack_data_dir(name)
 
     console.print(f"\n[bold]Rollback[/bold] — backup du {backed_up_at} (up {up_id})\n")
     console.print("  Sera restauré :")
     for inst_name in instruments:
-        for csv_path in compute_expected_csv_files(inst_name, data_dir):
-            backup_csv = bkp_dir / csv_path.name
+        inst_data_dir = stack_instrument_dir(name, inst_name)
+        for csv_path in compute_expected_csv_files(inst_name, inst_data_dir):
+            backup_csv = bkp_dir / inst_name / csv_path.name
             if backup_csv.exists():
                 console.print(f"    [cyan]←[/cyan] {csv_path}")
             else:

@@ -48,9 +48,7 @@ build_instrument_configs <- function(instruments, metadata) {
 split_fields_by_identifier <- function(metadata, form_name) {
   sub <- metadata[
     metadata$form_name == form_name &
-      metadata$field_type != "descriptive" &
-      !str_ends(metadata$field_name, "_identification_level") &
-      !str_ends(metadata$field_name, "_data_audience"),
+      metadata$field_type != "descriptive",
   ]
   list(
     identifiers     = sub$field_name[sub$identifier == "y"],
@@ -61,9 +59,7 @@ split_fields_by_identifier <- function(metadata, form_name) {
 get_form_fields <- function(metadata, form_name) {
   sub <- metadata[
     metadata$form_name == form_name &
-      metadata$field_type != "descriptive" &
-      !str_ends(metadata$field_name, "_identification_level") &
-      !str_ends(metadata$field_name, "_data_audience"),
+      metadata$field_type != "descriptive",
   ]
   sub$field_name
 }

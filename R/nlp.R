@@ -50,8 +50,8 @@ load_udpipe_model <- function(lang_code) {
 
   message(sprintf("Téléchargement du modèle udpipe '%s'...", lang_name))
   dl <- udpipe::udpipe_download_model(
-    language   = lang_name,
-    model_dir  = UDPIPE_MODELS_DIR
+    language  = lang_name,
+    model_dir = UDPIPE_MODELS_DIR
   )
   udpipe::udpipe_load_model(dl$file_model)
 }
@@ -95,6 +95,7 @@ detect_languages <- function(df) {
   short <- n_tokens < 30L
   langs[is.na(langs) | short] <- "unknown"
   df$langue <- langs
+  df$n_tokens <- n_tokens
   df
 }
 
@@ -106,95 +107,97 @@ tokenize_group <- function(df_lang, lang_code, output_dir) {
   model <- load_udpipe_model(lang_code)
   use_udpipe <- !is.null(model)
 
-  # --- Étape 1 : tokens bruts + lemmes ---
+  # --- Étape 1 : annotation complète ---
   if (use_udpipe) {
     ann <- udpipe::udpipe_annotate(model, x = df_lang$text, doc_id = df_lang$id)
     ann_df <- as.data.frame(ann, detailed = FALSE)
-    # Garder uniquement les mots (pas ponctuation, symboles)
-    ann_df <- ann_df[ann_df$upos %in% c(
-      "NOUN", "VERB", "ADJ", "ADV", "PROPN"
-    ), , drop = FALSE]
-    tokens_raw <- data.frame(
+    # Toutes les annotations avec indicateur de rétention UPOS
+    upos_keep <- c("NOUN", "VERB", "ADJ", "ADV", "PROPN")
+    ann_full <- data.frame(
       id = ann_df$doc_id,
       token = tolower(ann_df$token),
       lemma = tolower(ann_df$lemma),
       upos = ann_df$upos,
+      upos_retenu = ann_df$upos %in% upos_keep,
       stringsAsFactors = FALSE
     )
+    write_csv(ann_full, file.path(output_dir, "01_annotation.csv"))
+
+    # Transformations token → lemme uniquement
+    lemmatises <- ann_full[
+      ann_full$upos_retenu & ann_full$token != ann_full$lemma,
+      c("id", "token", "lemma", "upos"),
+      drop = FALSE
+    ]
+    write_csv(lemmatises, file.path(output_dir, "01b_lemmatisation.csv"))
+
+    tokens_raw <- ann_full[ann_full$upos_retenu, c("id", "token", "lemma", "upos"), drop = FALSE]
   } else {
     tokens_raw <- tidytext::unnest_tokens(df_lang, token, text, token = "words")
     tokens_raw$lemma <- tokens_raw$token
     tokens_raw$upos <- NA_character_
-  }
-
-  write_csv(
-    tokens_raw,
-    file.path(output_dir, "debug_01_tokens_bruts.csv")
-  )
-
-  # --- Étape 1b : transformations token → lemme (lemmatisation visible) ---
-  if (use_udpipe) {
-    lemmatises <- tokens_raw[tokens_raw$token != tokens_raw$lemma, , drop = FALSE]
-    write_csv(
-      lemmatises,
-      file.path(output_dir, "debug_01b_lemmatisation.csv")
-    )
+    write_csv(tokens_raw[, c("id", "token", "lemma", "upos")], file.path(output_dir, "01_annotation.csv"))
   }
 
   # --- Étape 2 : suppression stop-words (sur le lemme) ---
   if (lang_code %in% c("fr", "en")) {
     sw <- stopwords::stopwords(lang_code, source = "snowball")
-    tokens_sw <- tokens_raw[!tokens_raw$lemma %in% sw, , drop = FALSE]
+    mask_sw <- tokens_raw$lemma %in% sw
+    write_csv(tokens_raw[mask_sw, , drop = FALSE], file.path(output_dir, "02_stopwords_supprimes.csv"))
+    tokens_sw <- tokens_raw[!mask_sw, , drop = FALSE]
   } else {
+    write_csv(
+      data.frame(id = character(), token = character(), lemma = character(), upos = character()),
+      file.path(output_dir, "02_stopwords_supprimes.csv")
+    )
     tokens_sw <- tokens_raw
   }
-
-  write_csv(
-    tokens_sw,
-    file.path(output_dir, "debug_02_apres_stopwords.csv")
-  )
+  write_csv(tokens_sw, file.path(output_dir, "02_apres_stopwords.csv"))
 
   # --- Étape 3 : longueur minimale (sur le lemme) ---
-  tokens_len <- tokens_sw[nchar(tokens_sw$lemma) >= 3L, , drop = FALSE]
-
-  write_csv(
-    tokens_len,
-    file.path(output_dir, "debug_03_apres_min3chars.csv")
-  )
+  mask_len <- nchar(tokens_sw$lemma) < 3L
+  write_csv(tokens_sw[mask_len, , drop = FALSE], file.path(output_dir, "03_min_chars_supprimes.csv"))
+  tokens_len <- tokens_sw[!mask_len, , drop = FALSE]
+  write_csv(tokens_len, file.path(output_dir, "03_apres_min_chars.csv"))
 
   if (nrow(tokens_len) == 0L) {
     empty <- data.frame(id = character(), token = character(), stringsAsFactors = FALSE)
-    write_csv(empty, file.path(output_dir, "debug_04_apres_hapax.csv"))
+    write_csv(
+      data.frame(id = character(), token = character()),
+      file.path(output_dir, "04_hapax_supprimes.csv")
+    )
+    write_csv(empty, file.path(output_dir, "04_lemmes_finaux.csv"))
     return(empty)
   }
 
-  # Utiliser le lemme comme token final
-  tokens_final <- data.frame(
+  # --- Étape 4 : réduction aux lemmes ---
+  tokens_lemmes <- data.frame(
     id = tokens_len$id,
     token = tokens_len$lemma,
     stringsAsFactors = FALSE
   )
 
-  # --- Étape 4 : suppression hapax (seulement s'il existe des tokens partagés) ---
-  doc_freq <- tapply(tokens_final$id, tokens_final$token, function(x) length(unique(x)))
+  # --- Étape 5 : suppression hapax ---
+  doc_freq <- tapply(tokens_lemmes$id, tokens_lemmes$token, function(x) length(unique(x)))
   shared <- names(doc_freq)[doc_freq > 1L]
-  if (length(shared) > 0L) {
-    tokens_final <- tokens_final[tokens_final$token %in% shared, , drop = FALSE]
-  }
-
+  hapax <- names(doc_freq)[doc_freq == 1L]
   write_csv(
-    tokens_final,
-    file.path(output_dir, "debug_04_apres_hapax.csv")
+    tokens_lemmes[tokens_lemmes$token %in% hapax, , drop = FALSE],
+    file.path(output_dir, "04_hapax_supprimes.csv")
   )
+  if (length(shared) > 0L) {
+    tokens_lemmes <- tokens_lemmes[tokens_lemmes$token %in% shared, , drop = FALSE]
+  }
+  write_csv(tokens_lemmes, file.path(output_dir, "04_lemmes_finaux.csv"))
 
-  tokens_final[, c("id", "token"), drop = FALSE]
+  tokens_lemmes[, c("id", "token"), drop = FALSE]
 }
 
 # ---------------------------------------------------------------------------
 # TF-IDF
 # ---------------------------------------------------------------------------
 
-compute_tfidf <- function(tokens_df, lang_code) {
+compute_tfidf <- function(tokens_df, lang_code, output_dir = NULL) {
   if (nrow(tokens_df) == 0L) {
     return(data.frame(
       langue = character(), token = character(),
@@ -204,6 +207,14 @@ compute_tfidf <- function(tokens_df, lang_code) {
   }
   counts <- dplyr::count(tokens_df, id, token, name = "n")
   tfidf <- tidytext::bind_tf_idf(counts, token, id, n)
+
+  # Export détail par document si output_dir fourni
+  if (!is.null(output_dir)) {
+    detail <- tfidf[, c("id", "token", "n", "tf", "idf", "tf_idf")]
+    detail <- detail[order(detail$id, -detail$tf_idf), ]
+    write_csv(detail, file.path(output_dir, "05_tfidf_detail.csv"))
+  }
+
   summary <- dplyr::summarise(
     dplyr::group_by(tfidf, token),
     tf_idf_moyen = mean(tf_idf),
@@ -308,6 +319,13 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir) {
   }
 
   df <- detect_languages(df)
+
+  # Export 00 : source avec langue et n_tokens (avant split par langue)
+  write_csv(
+    df[, c("id", "langue", "n_tokens", "text"), drop = FALSE],
+    file.path(output_dir, "00_source.csv")
+  )
+
   lang_groups <- split(df, df$langue)
 
   all_tfidf <- list()
@@ -327,7 +345,7 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir) {
     tokens <- tokenize_group(grp, lang_code, lang_debug_dir)
     if (nrow(tokens) == 0L) next
 
-    all_tfidf[[lang_code]] <- compute_tfidf(tokens, lang_code)
+    all_tfidf[[lang_code]] <- compute_tfidf(tokens, lang_code, output_dir = lang_debug_dir)
 
     lda_res <- run_lda(tokens, lang_code, n_docs)
     if (!is.null(lda_res)) {

@@ -179,6 +179,27 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
   do.call(rbind, rows)
 }
 
+# Résout un code REDCap en label exporté selon le type du champ parent
+resolve_code_to_label <- function(code, parent_row) {
+  if (nrow(parent_row) == 0) {
+    return(code)
+  }
+  ptype <- parent_row$field_type[1]
+  if (ptype == "yesno") {
+    if (code == "1") "Oui" else if (code == "0") "Non" else code
+  } else if (code == "") {
+    ""
+  } else {
+    pchoices <- if ("select_choices_or_calculations" %in% names(parent_row)) {
+      parent_row$select_choices_or_calculations[1]
+    } else {
+      ""
+    }
+    lmap <- parse_choices(pchoices)
+    if (!is.null(lmap) && code %in% names(lmap)) lmap[[code]] else code
+  }
+}
+
 # Retourne le sous-ensemble de records applicables si branching_logic est de la forme
 # "[field] = 'code' [or [field] = 'code2' ...]", NULL sinon (logique non parseable).
 # Les codes sont résolus en labels via le dictionnaire (export REDCap = labels).
@@ -186,11 +207,44 @@ resolve_branching_filter <- function(records, branching, dict) {
   if (nchar(trimws(branching)) == 0) {
     return(NULL)
   }
-  # Ne traiter que les conditions "= 'code'" sans <>, AND, etc.
-  if (grepl("<>|AND|and", branching)) {
+  # Détecter le pattern AND exclusif : [field] <> 'X' AND [field] <> 'Y' AND ...
+  # (tous les termes portent sur le même champ avec <> uniquement)
+  pat_neq <- "^(\\s*\\[[^\\]]+\\]\\s*<>\\s*'[^']*'\\s*(AND\\s*)?)+$"
+  and_neq <- grepl(pat_neq, trimws(branching), perl = TRUE)
+  if (and_neq) {
+    m_neq <- gregexpr("\\[([^\\]]+)\\]\\s*<>\\s*'([^']*)'", branching, perl = TRUE)
+    neq_matches <- regmatches(branching, m_neq)[[1]]
+    if (length(neq_matches) == 0) {
+      return(NULL)
+    }
+    # Tous les termes doivent porter sur le même champ
+    caps_neq <- lapply(neq_matches, function(nm) {
+      regmatches(nm, regexec("\\[([^\\]]+)\\]\\s*<>\\s*'([^']*)'", nm, perl = TRUE))[[1]]
+    })
+    parent_fields <- sapply(caps_neq, `[`, 2)
+    if (length(unique(parent_fields)) != 1) {
+      return(NULL)
+    }
+    parent_field <- parent_fields[1]
+    excluded_codes <- sapply(caps_neq, `[`, 3)
+    if (!(parent_field %in% names(records))) {
+      return(NULL)
+    }
+    parent_vals <- as.character(records[[parent_field]])
+    parent_row <- dict[dict$field_name == parent_field, ]
+    excluded_labels <- sapply(excluded_codes, function(code) {
+      resolve_code_to_label(code, parent_row)
+    })
+    keep <- !is.na(parent_vals) & parent_vals != "" &
+      !parent_vals %in% excluded_labels
+    return(records[keep, , drop = FALSE])
+  }
+
+  # Sinon : ne traiter que les conditions "= 'code'" pures (pas de AND/OR mixtes)
+  if (grepl("AND|and", branching)) {
     return(NULL)
   }
-  # Extraire toutes les paires [field] = 'code'
+  # Extraire toutes les paires [field] = 'code' (reliées par OR)
   m <- gregexpr("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", branching, perl = TRUE)
   matches <- regmatches(branching, m)[[1]]
   if (length(matches) == 0) {
@@ -199,7 +253,7 @@ resolve_branching_filter <- function(records, branching, dict) {
   # Construire un filtre OR : au moins une condition vraie
   keep <- rep(FALSE, nrow(records))
   for (match in matches) {
-    cap <- regmatches(branching, regexec(
+    cap <- regmatches(match, regexec(
       "\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'",
       match,
       perl = TRUE
@@ -208,24 +262,8 @@ resolve_branching_filter <- function(records, branching, dict) {
     code <- cap[3]
     if (!(parent_field %in% names(records))) next
     parent_vals <- as.character(records[[parent_field]])
-    # Résoudre code → label via le dictionnaire du champ parent
     parent_row <- dict[dict$field_name == parent_field, ]
-    target_label <- if (nrow(parent_row) > 0) {
-      ptype <- parent_row$field_type[1]
-      if (ptype == "yesno") {
-        if (code == "1") "Oui" else if (code == "0") "Non" else code
-      } else {
-        pchoices <- if ("select_choices_or_calculations" %in% names(parent_row)) {
-          parent_row$select_choices_or_calculations[1]
-        } else {
-          ""
-        }
-        lmap <- parse_choices(pchoices)
-        if (!is.null(lmap) && code %in% names(lmap)) lmap[[code]] else code
-      }
-    } else {
-      code
-    }
+    target_label <- resolve_code_to_label(code, parent_row)
     keep <- keep | (parent_vals == target_label & !is.na(parent_vals))
   }
   records[keep, , drop = FALSE]

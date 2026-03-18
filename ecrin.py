@@ -688,11 +688,15 @@ def up() -> None:
 
         if action == "new":
             symbol = "[blue]+[/blue]"
+            reason_str = d["reason"]
         elif action == "modified":
             symbol = "[yellow]~[/yellow]"
+            reason_str = d["reason"]
         else:
             symbol = "[red]✗[/red]"
-        console.print(f"  {symbol} {inst['label']:<35} téléchargement...")
+            reason_str = d["reason"]
+        console.print(f"  {symbol} {inst['label']:<35} {reason_str}")
+        console.print(f"    téléchargement en cours...")
 
         task = {
             **api_cfg,

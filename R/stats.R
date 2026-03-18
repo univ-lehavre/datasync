@@ -36,8 +36,11 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     } else {
       ""
     }
-    conditional <- !is.na(branching) && nchar(trimws(branching)) > 0
-    missing_label <- if (conditional) "n_applicable" else "n_manquants"
+    if (is.na(branching)) branching <- ""
+    # Filtrer les enregistrements applicables selon la branching_logic
+    applicable_records <- resolve_branching_filter(records, branching, dict)
+    active_records <- if (!is.null(applicable_records)) applicable_records else records
+    missing_label <- "n_manquants"
 
     if (ftype == "checkbox") {
       # Colonnes checkbox : field___1, field___2, ...
@@ -54,7 +57,7 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
         } else {
           suffix
         }
-        cvals <- as.character(records[[col]])
+        cvals <- as.character(active_records[[col]])
         non_obf_c <- cvals[cvals != "***"]
         filled_c <- non_obf_c[!is.na(non_obf_c) & non_obf_c != "" & non_obf_c != "NA"]
         n_empty_c <- length(non_obf_c) - length(filled_c)
@@ -75,8 +78,8 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
       next
     }
 
-    if (!(field %in% names(records))) next
-    vals <- as.character(records[[field]])
+    if (!(field %in% names(active_records))) next
+    vals <- as.character(active_records[[field]])
 
     if (ftype == "file") {
       non_empty <- vals[!is.na(vals) & vals != "" & vals != "NA" & vals != "***"]
@@ -145,6 +148,58 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     ))
   }
   do.call(rbind, rows)
+}
+
+# Retourne le sous-ensemble de records applicables si branching_logic est de la forme
+# "[field] = 'code' [or [field] = 'code2' ...]", NULL sinon (logique non parseable).
+# Les codes sont résolus en labels via le dictionnaire (export REDCap = labels).
+resolve_branching_filter <- function(records, branching, dict) {
+  if (nchar(trimws(branching)) == 0) {
+    return(NULL)
+  }
+  # Ne traiter que les conditions "= 'code'" sans <>, AND, etc.
+  if (grepl("<>|AND|and", branching)) {
+    return(NULL)
+  }
+  # Extraire toutes les paires [field] = 'code'
+  m <- gregexpr("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", branching, perl = TRUE)
+  matches <- regmatches(branching, m)[[1]]
+  if (length(matches) == 0) {
+    return(NULL)
+  }
+  # Construire un filtre OR : au moins une condition vraie
+  keep <- rep(FALSE, nrow(records))
+  for (match in matches) {
+    parts <- regmatches(
+      match,
+      regexpr("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", match, perl = TRUE)
+    )
+    cap <- regmatches(match, regexec("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", match))[[1]]
+    parent_field <- cap[2]
+    code <- cap[3]
+    if (!(parent_field %in% names(records))) next
+    parent_vals <- as.character(records[[parent_field]])
+    # Résoudre code → label via le dictionnaire du champ parent
+    parent_row <- dict[dict$field_name == parent_field, ]
+    target_label <- if (nrow(parent_row) > 0) {
+      ptype <- parent_row$field_type[1]
+      if (ptype == "yesno") {
+        if (code == "1") "Oui" else if (code == "0") "Non" else code
+      } else {
+        pchoices <- if ("select_choices_or_calculations" %in% names(parent_row)) {
+          parent_row$select_choices_or_calculations[1]
+        } else {
+          ""
+        }
+        lmap <- parse_choices(pchoices)
+        if (!is.null(lmap) && code %in% names(lmap)) lmap[[code]] else code
+      }
+    } else {
+      code
+    }
+    keep <- keep | (parent_vals == target_label & !is.na(parent_vals))
+  }
+  records[keep, , drop = FALSE]
 }
 
 # Parse "1, Label un | 2, Label deux | ..." → list("1"="Label un", "2"="Label deux")

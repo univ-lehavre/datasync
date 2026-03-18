@@ -158,7 +158,14 @@ def run_r_task(script: str, task: dict) -> dict:
             text=True,
         )
         if result.returncode != 0:
-            console.print(f"[red]Erreur R ({script}):[/red]\n{result.stderr}")
+            stderr = result.stderr
+            if "<!DOCTYPE" in stderr or "<html" in stderr.lower() or "invalid char in json" in stderr:
+                console.print(
+                    "[red]L'API REDCap a renvoyé une page HTML au lieu de JSON.[/red]\n"
+                    "  Vérifiez que vous êtes connecté au VPN."
+                )
+            else:
+                console.print(f"[red]Erreur R ({script}):[/red]\n{stderr}")
             raise typer.Exit(1)
         stdout = result.stdout.strip()
         match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}", stdout, re.DOTALL)

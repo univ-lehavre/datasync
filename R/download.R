@@ -204,7 +204,11 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
     )
 
     if (!is.null(records) && nrow(records) > 0) {
-      csv_fields <- if (config$has_identifiers) c(identifiers, non_identifiers) else c(name_fields, all_form_fields)
+      csv_fields <- if (config$has_identifiers) {
+        c(id_field, identifiers, non_identifiers)
+      } else {
+        c(id_field, name_fields, all_form_fields)
+      }
       csv_path <- file.path(data_dir, sprintf("vague2_%s_identifiables.csv", config$name))
       write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = FALSE)
       result$ident_records <- records

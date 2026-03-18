@@ -99,7 +99,7 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     }
 
     if (ftype %in% c("yesno", "radio", "dropdown", "sql")) {
-      option_labels <- if (ftype != "yesno") parse_choices(choices) else NULL
+      option_labels <- if (ftype %in% c("radio", "dropdown")) parse_choices(choices) else NULL
       non_obf <- vals[vals != "***"]
       n_missing <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
       filled <- non_obf[!is.na(non_obf) & non_obf != "" & non_obf != "NA"]

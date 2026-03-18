@@ -16,3 +16,9 @@ instruments: auto
 #   - questions_recherche
 #   - publications
 #   - propositions_projets
+
+# Champs textuels à analyser par NLP (instrument: champ)
+# Exécuté automatiquement lors d'un `up` et via la commande `nlp`
+nlp_fields:
+  - instrument: research_questions
+    field: research_questions

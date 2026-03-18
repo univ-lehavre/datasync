@@ -164,6 +164,7 @@ download_instrument_data <- function(
   pseudo_ids <- character(0)
   anon_ids <- character(0)
   aggregated_ids <- character(0)
+  stats_only_ids <- character(0) # audience-filtered + aggregated : stats uniquement
 
   for (i in seq_len(nrow(control_records))) {
     id <- as.character(control_records[[id_field]][i])
@@ -184,21 +185,31 @@ download_instrument_data <- function(
     }
 
     not_public_audience <- is.na(data_audience) || !grepl("General public", data_audience, fixed = TRUE)
-    if (audience == "public" && not_public_audience) {
+    audience_filtered <- audience == "public" && not_public_audience
+
+    if (audience_filtered) {
       result$stats$audience_filtered <- result$stats$audience_filtered + 1L
-      next
     }
 
-    if (audience == "admin") {
-      ident_ids <- c(ident_ids, id)
-    } else if (grepl("Identifiable", id_level, fixed = TRUE)) {
-      ident_ids <- c(ident_ids, id)
-    } else if (grepl("Pseudonymised", id_level, fixed = TRUE)) {
-      pseudo_ids <- c(pseudo_ids, id)
-    } else if (grepl("Anonymised", id_level, fixed = TRUE)) {
-      anon_ids <- c(anon_ids, id)
-    } else if (grepl("Aggregated", id_level, fixed = TRUE)) {
-      aggregated_ids <- c(aggregated_ids, id)
+    # Classement pour les CSV individuels (respecte le filtre audience)
+    if (!audience_filtered) {
+      if (audience == "admin") {
+        ident_ids <- c(ident_ids, id)
+      } else if (grepl("Identifiable", id_level, fixed = TRUE)) {
+        ident_ids <- c(ident_ids, id)
+      } else if (grepl("Pseudonymised", id_level, fixed = TRUE)) {
+        pseudo_ids <- c(pseudo_ids, id)
+      } else if (grepl("Anonymised", id_level, fixed = TRUE)) {
+        anon_ids <- c(anon_ids, id)
+      } else if (grepl("Aggregated", id_level, fixed = TRUE)) {
+        aggregated_ids <- c(aggregated_ids, id)
+      }
+    }
+
+    # Classement pour les statistiques : tous les participants
+    # sauf ceux déjà inclus via ident/pseudo/anon (qui ont leurs données complètes)
+    if (audience_filtered || grepl("Aggregated", id_level, fixed = TRUE)) {
+      stats_only_ids <- c(stats_only_ids, id)
     }
   }
 
@@ -287,8 +298,30 @@ download_instrument_data <- function(
     result$stats$aggregated <- result$stats$aggregated + length(aggregated_ids)
   }
 
-  # 6. Export CSV statistiques par variable
-  all_levels <- list(result$anon_records, result$pseudo_records, result$ident_records)
+  # 6. Enregistrements stats-only (audience-filtered + agrégés) : tous les champs
+  # Les champs identifiants sont obfusqués à "***" pour protéger l'identité,
+  # mais leur présence/absence reste comptabilisée dans les statistiques.
+  stats_only_records <- NULL
+  if (length(stats_only_ids) > 0) {
+    stats_only_records <- tryCatch(
+      get_records_with_fields_and_ids(api_url, token, fields_to_download, stats_only_ids),
+      error = function(e) {
+        warning(sprintf("[%s] erreur récupération stats-only: %s", config$name, conditionMessage(e)))
+        NULL
+      }
+    )
+    # Obfusquer tous les champs identifiants (id + identifiers)
+    if (!is.null(stats_only_records)) {
+      for (col in nominative_fields) {
+        if (col %in% names(stats_only_records)) {
+          stats_only_records[[col]] <- "***"
+        }
+      }
+    }
+  }
+
+  # 7. Export CSV statistiques par variable
+  all_levels <- list(result$anon_records, result$pseudo_records, result$ident_records, stats_only_records)
   anon_rows_all <- Filter(Negate(is.null), all_levels)
   anon_all <- if (length(anon_rows_all) > 0) do.call(rbind, anon_rows_all) else NULL
   if (!is.null(dict) && !is.null(anon_all) && nrow(anon_all) > 0) {

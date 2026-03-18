@@ -494,6 +494,12 @@ instruments: auto
 #   - questions_recherche
 #   - publications
 #   - propositions_projets
+
+# Champs textuels à analyser par NLP (instrument: champ)
+# Exécuté automatiquement lors d'un `up` et via la commande `nlp`
+# nlp_fields:
+#   - instrument: research_questions
+#     field: research_questions
 """
 
 
@@ -622,6 +628,13 @@ def preview() -> None:
         console.print("  [yellow]Aucun instrument détecté.[/yellow]")
         return
 
+    nlp_fields = cfg.get("nlp_fields") or []
+    nlp_missing: list[str] = []
+    for entry in nlp_fields:
+        inst_dir = stack_instrument_dir(name, entry["instrument"])
+        if not (inst_dir / f"nlp-{entry['field']}").exists():
+            nlp_missing.append(f"{entry['instrument']}/{entry['field']}")
+
     n_actions = sum(1 for d in diff if d["action"] != "ok")
     n_ok = sum(1 for d in diff if d["action"] == "ok")
 
@@ -630,7 +643,13 @@ def preview() -> None:
         action = d["action"]
         reason = d["reason"]
         if action == "ok":
-            console.print(f"  [green]✓[/green] {inst['label']:<35} {reason}")
+            inst_nlp_missing = [
+                e["field"] for e in nlp_fields
+                if e["instrument"] == inst["name"]
+                and not (stack_instrument_dir(name, inst["name"]) / f"nlp-{e['field']}").exists()
+            ]
+            nlp_note = f" [yellow](NLP manquant : {', '.join(inst_nlp_missing)})[/yellow]" if inst_nlp_missing else ""
+            console.print(f"  [green]✓[/green] {inst['label']:<35} {reason}{nlp_note}")
         elif action == "new":
             console.print(f"  [blue]+[/blue] {inst['label']:<35} à télécharger ({reason})")
         elif action == "modified":
@@ -639,8 +658,13 @@ def preview() -> None:
             console.print(f"  [red]✗[/red] {inst['label']:<35} corrompu — {reason}")
 
     console.print()
-    if n_actions == 0:
+    if n_actions == 0 and not nlp_missing:
         console.print("[green]Tout est à jour. Aucune action nécessaire.[/green]")
+    elif n_actions == 0 and nlp_missing:
+        console.print(
+            f"[yellow]NLP manquant pour : {', '.join(nlp_missing)}[/yellow]\n"
+            f"Utilisez [cyan]ecrin.py up[/cyan] pour générer."
+        )
     else:
         console.print(
             f"{n_actions} action(s), {n_ok} instrument(s) en cache\n"
@@ -674,6 +698,7 @@ def up() -> None:
 
     diff = compute_diff(cfg, api_cfg, name, audience)
     metadata_path = stack_metadata_dir(name) / "metadata.json"
+    metadata = load_json(metadata_path)
 
     if not diff:
         console.print("[yellow]Aucun instrument détecté.[/yellow]")
@@ -722,6 +747,9 @@ def up() -> None:
 
         inst_data_dir = stack_instrument_dir(name, inst["name"])
         inst_data_dir.mkdir(parents=True, exist_ok=True)
+
+        for nlp_dir in inst_data_dir.glob("nlp-*/"):
+            shutil.rmtree(nlp_dir)
 
         dict_csv_path = stack_metadata_dir(name) / "dictionnaire.csv"
         task = {
@@ -784,6 +812,39 @@ def up() -> None:
         )
         if file_hashes:
             console.print(f"    [green]✓[/green] {len(file_hashes)} CSV vérifié(s) (SHA-256)")
+
+        nlp_entries = [
+            e for e in (cfg.get("nlp_fields") or [])
+            if e["instrument"] == inst["name"]
+        ]
+        anon_csv = inst_data_dir / "anonymises.csv"
+        if nlp_entries and anon_csv.exists():
+            for entry in nlp_entries:
+                field = entry["field"]
+                output_dir = inst_data_dir / f"nlp-{field}"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                nlp_task = {
+                    "csv_path": str(anon_csv),
+                    "field": field,
+                    "id_field": metadata[0]["field_name"] if metadata else "record_id",
+                    "output_dir": str(output_dir),
+                }
+                nlp_result = run_r_task("nlp_text.R", nlp_task)
+                langues = nlp_result.get("langues", {})
+                lda_k = nlp_result.get("lda_k", {})
+                lang_summary = ", ".join(
+                    f"{lang}:{n}(k={lda_k[lang]})" if lang in lda_k else f"{lang}:{n}"
+                    for lang, n in langues.items()
+                )
+                nlp_hashes = {
+                    f"nlp-{field}/{f.name}": sha256_file(f)
+                    for f in output_dir.iterdir()
+                    if f.is_file()
+                }
+                redcap_state[key]["files"].update(nlp_hashes)
+                save_redcap_state(name, redcap_state)
+                console.print(f"    [green]✓[/green] NLP {field} — {lang_summary or 'vide'}")
+
         log_actions.append({"instrument": inst["name"], "status": action})
 
     instruments_used = [d["instrument"]["name"] for d in diff]
@@ -847,6 +908,8 @@ def refresh() -> None:
             continue
         inst_name = key.replace(f"__{audience}", "")
         inst_dir = stack_instrument_dir(name, inst_name)
+        for nlp_dir in inst_dir.glob("nlp-*/"):
+            shutil.rmtree(nlp_dir)
         file_hashes = {
             csv_path.name: sha256_file(csv_path)
             for csv_path in compute_expected_csv_files(inst_name, inst_dir)
@@ -1106,6 +1169,7 @@ def state() -> None:
             )
         console.print(table)
     console.print()
+
 
 
 # ---------------------------------------------------------------------------

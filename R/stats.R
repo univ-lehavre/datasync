@@ -62,6 +62,7 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
           suffix
         }
         cvals <- as.character(active_records[[col]])
+        cvals <- cvals[!is.na(cvals)]
         obf_c <- cvals[cvals == "***"]
         n_obf_total <- max(n_obf_total, length(obf_c))
         non_obf_c <- cvals[cvals != "***"]
@@ -85,12 +86,16 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
 
     if (!(field %in% names(active_records))) next
     vals <- as.character(active_records[[field]])
+    # NA = champ non collecté (enregistrement stats-only) : exclus de toutes les statistiques
+    vals <- vals[!is.na(vals)]
 
     # Pour les champs conditionnels, émettre n_applicable en tête
+    # (exclure les lignes non collectées = NA)
     if (conditional) {
+      n_applicable <- sum(!is.na(as.character(active_records[[field]])))
       rows <- c(rows, list(data.frame(
         variable = field, statistique = "n_applicable",
-        valeur = as.character(nrow(active_records)), stringsAsFactors = FALSE
+        valeur = as.character(n_applicable), stringsAsFactors = FALSE
       )))
     }
 
@@ -148,7 +153,7 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
 
     # text, notes, calc, slider, et autres
     n_obf <- sum(vals == "***")
-    n_rens <- sum(!is.na(vals) & vals != "" & vals != "NA" & vals != "***")
+    n_rens <- sum(!is.na(vals) & vals != "" & vals != "NA")
     n_missing <- sum(is.na(vals) | vals == "" | vals == "NA")
     rows <- c(rows, list(
       data.frame(

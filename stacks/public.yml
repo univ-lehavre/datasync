@@ -1,9 +1,10 @@
-# Stack ECRIN — 2026-02-03
+# Stack ECRIN — 2026-03-18
 
 # Audience cible
 # "public"      → participants ayant choisi "General public"
-# "chercheurs"  → tous les participants
-audience: "public"
+# "chercheurs"  → tous les participants (filtre audience respecté)
+# "admin"       → tous les participants sans filtre (toutes les données)
+audience: public
 
 # Instruments à inclure
 # "auto"  → détection automatique depuis REDCap
@@ -15,3 +16,9 @@ instruments: auto
 #   - questions_recherche
 #   - publications
 #   - propositions_projets
+
+# Champs textuels à analyser par NLP (instrument: champ)
+# Exécuté automatiquement lors d'un `up` et via la commande `nlp`
+nlp_fields:
+  - instrument: research_questions
+    field: research_questions

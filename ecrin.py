@@ -629,11 +629,17 @@ def preview() -> None:
         return
 
     nlp_fields = cfg.get("nlp_fields") or []
+    redcap_state = load_redcap_state(name)
     nlp_missing: list[str] = []
     for entry in nlp_fields:
         inst_dir = stack_instrument_dir(name, entry["instrument"])
-        if not (inst_dir / f"nlp-{entry['field']}").exists():
-            nlp_missing.append(f"{entry['instrument']}/{entry['field']}")
+        field = entry["field"]
+        nlp_dir = inst_dir / f"nlp-{field}"
+        key = instrument_state_key(entry["instrument"], audience)
+        inst_files = redcap_state.get(key, {}).get("files", {})
+        has_sha = any(k.startswith(f"nlp-{field}/") for k in inst_files)
+        if not nlp_dir.exists() or not has_sha:
+            nlp_missing.append(f"{entry['instrument']}/{field}")
 
     n_actions = sum(1 for d in diff if d["action"] != "ok")
     n_ok = sum(1 for d in diff if d["action"] == "ok")
@@ -643,10 +649,15 @@ def preview() -> None:
         action = d["action"]
         reason = d["reason"]
         if action == "ok":
+            inst_key = instrument_state_key(inst["name"], audience)
+            inst_files = redcap_state.get(inst_key, {}).get("files", {})
             inst_nlp_missing = [
                 e["field"] for e in nlp_fields
                 if e["instrument"] == inst["name"]
-                and not (stack_instrument_dir(name, inst["name"]) / f"nlp-{e['field']}").exists()
+                and (
+                    not (stack_instrument_dir(name, inst["name"]) / f"nlp-{e['field']}").exists()
+                    or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files)
+                )
             ]
             nlp_note = f" [yellow](NLP manquant : {', '.join(inst_nlp_missing)})[/yellow]" if inst_nlp_missing else ""
             console.print(f"  [green]✓[/green] {inst['label']:<35} {reason}{nlp_note}")

@@ -129,6 +129,15 @@ tokenize_group <- function(df_lang, lang_code, output_dir) {
     file.path(output_dir, "debug_01_tokens_bruts.csv")
   )
 
+  # --- Étape 1b : transformations token → lemme (lemmatisation visible) ---
+  if (use_udpipe) {
+    lemmatises <- tokens_raw[tokens_raw$token != tokens_raw$lemma, , drop = FALSE]
+    write_csv(
+      lemmatises,
+      file.path(output_dir, "debug_01b_lemmatisation.csv")
+    )
+  }
+
   # --- Étape 2 : suppression stop-words (sur le lemme) ---
   if (lang_code %in% c("fr", "en")) {
     sw <- stopwords::stopwords(lang_code, source = "snowball")
@@ -147,7 +156,7 @@ tokenize_group <- function(df_lang, lang_code, output_dir) {
 
   write_csv(
     tokens_len,
-    file.path(output_dir, "debug_03_apres_longueur.csv")
+    file.path(output_dir, "debug_03_apres_min3chars.csv")
   )
 
   if (nrow(tokens_len) == 0L) {

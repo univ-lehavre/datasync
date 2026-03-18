@@ -711,6 +711,8 @@ def up() -> None:
     diff = compute_diff(cfg, api_cfg, name, audience)
     metadata_path = stack_metadata_dir(name) / "metadata.json"
     metadata = load_json(metadata_path)
+    instruments_path = stack_metadata_dir(name) / "instruments.json"
+    all_instruments = load_json(instruments_path) if instruments_path.exists() else []
 
     if not diff:
         console.print("[yellow]Aucun instrument détecté.[/yellow]")

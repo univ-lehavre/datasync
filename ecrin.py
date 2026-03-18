@@ -835,11 +835,22 @@ def up() -> None:
                 field = entry["field"]
                 output_dir = inst_data_dir / f"nlp-{field}"
                 output_dir.mkdir(parents=True, exist_ok=True)
+                profile_inst = next(
+                    (i for i in all_instruments if "researcher_profile" in i["name"]),
+                    None,
+                )
+                profile_ident = (
+                    stack_instrument_dir(stack_name, profile_inst["name"]) / "identifiables.csv"
+                    if profile_inst
+                    else None
+                )
                 nlp_task = {
                     "csv_path": str(nlp_csv),
                     "field": field,
                     "id_field": metadata[0]["field_name"] if metadata else "record_id",
                     "output_dir": str(output_dir),
+                    "field_identifiables_path": str(inst_data_dir / "identifiables.csv"),
+                    "profile_identifiables_path": str(profile_ident) if profile_ident and profile_ident.exists() else None,
                 }
                 nlp_result = run_r_task("nlp_text.R", nlp_task)
                 langues = nlp_result.get("langues", {})

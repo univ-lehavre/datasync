@@ -284,7 +284,63 @@ extract_lda_individus <- function(model, lang_code, k, tokens_df) {
 # Pipeline principal
 # ---------------------------------------------------------------------------
 
-run_nlp_pipeline <- function(csv_path, field, id_field, output_dir) {
+enrich_lda_individus <- function(individus_df, field_identifiables_path,
+                                 profile_identifiables_path, id_level_field) {
+  if (is.null(field_identifiables_path) || is.null(profile_identifiables_path)) {
+    return(NULL)
+  }
+  if (!file.exists(field_identifiables_path) || !file.exists(profile_identifiables_path)) {
+    return(NULL)
+  }
+  if (nrow(individus_df) == 0L) {
+    return(NULL)
+  }
+
+  # Participants ayant autorisé l'identification sur ce champ
+  field_df <- as.data.frame(read_csv(field_identifiables_path, show_col_types = FALSE))
+  if (!(id_level_field %in% names(field_df)) || !("hashed_id" %in% names(field_df))) {
+    return(NULL)
+  }
+  allowed_levels <- c(
+    "Identifiable (my name visible)",
+    "Pseudonymised (an identifier replaces my name)"
+  )
+  authorised <- field_df[
+    field_df[[id_level_field]] %in% allowed_levels & field_df$hashed_id != "***",
+    "hashed_id",
+    drop = TRUE
+  ]
+
+  # Noms depuis le profil chercheur
+  profile_df <- as.data.frame(read_csv(profile_identifiables_path, show_col_types = FALSE))
+  name_cols <- intersect(c("last_name", "first_name", "middle_name"), names(profile_df))
+  if (length(name_cols) == 0L || !("hashed_id" %in% names(profile_df))) {
+    return(NULL)
+  }
+  profile_names <- profile_df[
+    profile_df$hashed_id != "***",
+    c("hashed_id", name_cols),
+    drop = FALSE
+  ]
+
+  # Jointure : individus autorisés × noms
+  enrichi <- merge(
+    individus_df[individus_df$userid %in% authorised, , drop = FALSE],
+    profile_names,
+    by.x = "userid", by.y = "hashed_id",
+    all.x = TRUE
+  )
+  if (nrow(enrichi) == 0L) {
+    return(NULL)
+  }
+  # Réordonner : noms en tête
+  other_cols <- setdiff(names(enrichi), c("userid", name_cols))
+  enrichi[, c("userid", name_cols, other_cols), drop = FALSE]
+}
+
+run_nlp_pipeline <- function(csv_path, field, id_field, output_dir,
+                             field_identifiables_path = NULL,
+                             profile_identifiables_path = NULL) {
   df <- load_and_filter_texts(csv_path, field, id_field)
   if (nrow(df) == 0L) {
     write_nlp_empty(output_dir)
@@ -350,6 +406,17 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir) {
   write_csv(tfidf_df, file.path(output_dir, "tfidf.csv"))
   write_csv(topics_df, file.path(output_dir, "lda_topics.csv"))
   write_csv(individus_df, file.path(output_dir, "lda_individus.csv"))
+
+  id_level_field <- paste0(field, "_identification_level")
+  enrichi <- enrich_lda_individus(
+    individus_df,
+    field_identifiables_path    = field_identifiables_path,
+    profile_identifiables_path  = profile_identifiables_path,
+    id_level_field              = id_level_field
+  )
+  if (!is.null(enrichi)) {
+    write_csv(enrichi, file.path(output_dir, "lda_individus_enrichi.csv"))
+  }
 
   list(ok = TRUE, langues = langues_count, lda_k = lda_k)
 }

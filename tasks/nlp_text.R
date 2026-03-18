@@ -41,10 +41,12 @@ if (length(missing_fields) > 0L) {
 dir_create(task$output_dir, recurse = TRUE)
 
 result <- run_nlp_pipeline(
-  csv_path   = task$csv_path,
-  field      = task$field,
-  id_field   = task$id_field,
-  output_dir = task$output_dir
+  csv_path                   = task$csv_path,
+  field                      = task$field,
+  id_field                   = task$id_field,
+  output_dir                 = task$output_dir,
+  field_identifiables_path   = task$field_identifiables_path,
+  profile_identifiables_path = task$profile_identifiables_path
 )
 
 cat(toJSON(result, auto_unbox = TRUE))

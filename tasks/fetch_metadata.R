@@ -41,7 +41,12 @@ write(
   file.path(metadata_dir, "metadata.json")
 )
 
-generate_variables_csv(metadata, file.path(metadata_dir, "dictionnaire.csv"))
+dict_body <- request(task$api_url) |>
+  req_method("POST") |>
+  req_body_form(token = task$token, content = "metadata", format = "csv") |>
+  req_perform() |>
+  resp_body_string()
+writeLines(dict_body, file.path(metadata_dir, "dictionnaire.csv"))
 
 cat(toJSON(list(
   ok = TRUE,

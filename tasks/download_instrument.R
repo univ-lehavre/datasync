@@ -42,10 +42,10 @@ n_pseudo <- if (!is.null(result$pseudo_records)) nrow(result$pseudo_records) els
 n_anon <- if (!is.null(result$anon_records)) nrow(result$anon_records) else 0L
 
 csv_files <- list(
-  vague2 = file.path(data_dir, sprintf("vague2_%s_identifiables.csv", config$name)),
-  vague3 = file.path(data_dir, sprintf("vague3_%s_pseudonymises.csv", config$name)),
-  vague4 = file.path(data_dir, sprintf("vague4_%s_anonymises.csv", config$name)),
-  vague5 = file.path(data_dir, sprintf("vague5_%s_statistiques.csv", config$name))
+  identifiables = file.path(data_dir, sprintf("%s_identifiables.csv", config$name)),
+  pseudonymises = file.path(data_dir, sprintf("%s_pseudonymises.csv", config$name)),
+  anonymises = file.path(data_dir, sprintf("%s_anonymises.csv", config$name)),
+  statistiques = file.path(data_dir, sprintf("%s_statistiques.csv", config$name))
 )
 # Garder seulement les fichiers qui existent
 csv_files <- Filter(file.exists, csv_files)

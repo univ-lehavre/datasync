@@ -233,10 +233,10 @@ def instrument_state_key(instrument_name: str, audience: str) -> str:
 
 def compute_expected_csv_files(instrument_name: str, data_dir: Path) -> list[Path]:
     return [
-        data_dir / f"vague2_{instrument_name}_identifiables.csv",
-        data_dir / f"vague3_{instrument_name}_pseudonymises.csv",
-        data_dir / f"vague4_{instrument_name}_anonymises.csv",
-        data_dir / f"vague5_{instrument_name}_statistiques.csv",
+        data_dir / f"{instrument_name}_identifiables.csv",
+        data_dir / f"{instrument_name}_pseudonymises.csv",
+        data_dir / f"{instrument_name}_anonymises.csv",
+        data_dir / f"{instrument_name}_statistiques.csv",
     ]
 
 
@@ -727,7 +727,7 @@ def up() -> None:
         dl_result = run_r_task("download_instrument.R", task)
 
         if inst.get("file_fields") and dl_result.get("n_ident", 0) > 0:
-            ident_csv = data_dir / f"vague2_{inst['name']}_identifiables.csv"
+            ident_csv = data_dir / f"{inst['name']}_identifiables.csv"
             if ident_csv.exists():
                 file_task = {
                     **api_cfg,

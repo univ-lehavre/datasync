@@ -128,7 +128,9 @@ download_instrument_files <- function(
 # ---------------------------------------------------------------------------
 # Téléchargement complet d'un instrument (par niveaux)
 # ---------------------------------------------------------------------------
-download_instrument_data <- function(api_url, token, metadata, id_field, audience, config, data_dir = DATA_DIR) {
+download_instrument_data <- function(
+    api_url, token, metadata, id_field, audience, config,
+    data_dir = DATA_DIR, dict = NULL) {
   result <- list(
     config = config,
     ident_records = NULL,
@@ -292,21 +294,16 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
     result$stats$aggregated <- result$stats$aggregated + length(aggregated_ids)
   }
 
-  # 6. Export CSV statistiques
-  n_stats <- result$stats$no_response + result$stats$audience_filtered + result$stats$aggregated
-  if (n_stats > 0) {
+  # 6. Export CSV statistiques par variable
+  all_levels <- list(result$anon_records, result$pseudo_records, result$ident_records)
+  anon_rows_all <- Filter(Negate(is.null), all_levels)
+  anon_all <- if (length(anon_rows_all) > 0) do.call(rbind, anon_rows_all) else NULL
+  if (!is.null(dict) && !is.null(anon_all) && nrow(anon_all) > 0) {
     csv_path <- file.path(data_dir, "statistiques.csv")
-    stats_df <- data.frame(
-      categorie = c("sans_reponse", "filtre_audience", "agreges", "total"),
-      nombre = c(
-        result$stats$no_response,
-        result$stats$audience_filtered,
-        result$stats$aggregated,
-        n_stats
-      ),
-      stringsAsFactors = FALSE
-    )
-    write_csv(stats_df, csv_path)
+    stats_df <- compute_instrument_stats(anon_all, dict, config$name, id_field)
+    if (!is.null(stats_df) && nrow(stats_df) > 0) {
+      write_csv(stats_df, csv_path)
+    }
   }
 
   result

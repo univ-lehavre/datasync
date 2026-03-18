@@ -17,6 +17,7 @@ source(file.path(script_dir, "config.R"))
 source(file.path(script_dir, "api_redcap.R"))
 source(file.path(script_dir, "instruments.R"))
 source(file.path(script_dir, "download.R"))
+source(file.path(script_dir, "stats.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 task_idx <- which(args == "--task")
@@ -26,6 +27,9 @@ task <- fromJSON(args[task_idx + 1L])
 metadata <- fromJSON(task$metadata_path, simplifyDataFrame = TRUE)
 id_field <- metadata$field_name[1]
 
+has_dict <- !is.null(task$dict_path) && nchar(task$dict_path) > 0 && file.exists(task$dict_path)
+dict <- if (has_dict) read_csv(task$dict_path, show_col_types = FALSE) else NULL
+
 config <- task$instrument
 config$file_fields <- as.character(config$file_fields)
 
@@ -34,7 +38,7 @@ dir_create(data_dir, recurse = TRUE)
 
 result <- download_instrument_data(
   task$api_url, task$token, metadata, id_field, task$audience, config,
-  data_dir = data_dir
+  data_dir = data_dir, dict = dict
 )
 
 n_ident <- if (!is.null(result$ident_records)) nrow(result$ident_records) else 0L

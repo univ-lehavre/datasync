@@ -723,11 +723,13 @@ def up() -> None:
         inst_data_dir = stack_instrument_dir(name, inst["name"])
         inst_data_dir.mkdir(parents=True, exist_ok=True)
 
+        dict_csv_path = stack_metadata_dir(name) / "dictionnaire.csv"
         task = {
             **api_cfg,
             "audience": audience,
             "instrument": inst,
             "metadata_path": str(metadata_path),
+            "dict_path": str(dict_csv_path),
             "data_dir": str(inst_data_dir),
         }
         dl_result = run_r_task("download_instrument.R", task)

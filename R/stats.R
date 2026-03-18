@@ -50,6 +50,9 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
       # Parse options pour labels
       option_labels <- parse_choices(choices)
 
+      # Codes bruts "1"/"0" ou labels "Checked"/"Unchecked" selon export REDCap
+      checked_vals <- c("1", "Checked", "Oui", "Yes")
+      n_obf_total <- 0L
       for (col in checkbox_cols) {
         suffix <- sub(paste0("^", field, "___"), "", col)
         label <- if (!is.null(option_labels) && suffix %in% names(option_labels)) {
@@ -58,23 +61,24 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
           suffix
         }
         cvals <- as.character(active_records[[col]])
+        obf_c <- cvals[cvals == "***"]
+        n_obf_total <- max(n_obf_total, length(obf_c))
         non_obf_c <- cvals[cvals != "***"]
         filled_c <- non_obf_c[!is.na(non_obf_c) & non_obf_c != "" & non_obf_c != "NA"]
-        n_empty_c <- length(non_obf_c) - length(filled_c)
-        # Codes bruts "1"/"0" ou labels "Checked"/"Unchecked" selon export REDCap
-        checked_vals <- c("1", "Checked", "Oui", "Yes")
         n_coches <- sum(filled_c %in% checked_vals)
         rows <- c(rows, list(
           data.frame(
             variable = field, statistique = label,
             valeur = as.character(n_coches), stringsAsFactors = FALSE
-          ),
-          data.frame(
-            variable = field, statistique = missing_label,
-            valeur = as.character(n_empty_c), stringsAsFactors = FALSE
           )
         ))
       }
+      rows <- c(rows, list(
+        data.frame(
+          variable = field, statistique = missing_label,
+          valeur = as.character(n_obf_total), stringsAsFactors = FALSE
+        )
+      ))
       next
     }
 

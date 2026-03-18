@@ -91,7 +91,7 @@ download_instrument_files <- function(api_url, token, records, id_field, config)
 
     for (field_name in config$file_fields) {
       val <- if (field_name %in% names(records)) as.character(records[[field_name]][i]) else ""
-      if (nchar(val) == 0 || val == "NA" || val == "<nil>") next
+      if (is.na(val) || nchar(val) == 0 || val == "NA" || val == "<nil>") next
 
       # Cas spécial : portrait avec portrait_choice
       if (field_name == "portrait") {

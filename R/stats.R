@@ -46,9 +46,13 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
         } else {
           suffix
         }
-        vals <- as.character(records[[col]])
-        n_coches <- sum(!is.na(vals) & vals == "1" & vals != "***")
-        n_manq <- sum(is.na(vals) | vals == "" | vals == "NA" | vals == "***")
+        cvals <- as.character(records[[col]])
+        non_obf_c <- cvals[cvals != "***"]
+        n_manq <- sum(is.na(non_obf_c) | non_obf_c == "" | non_obf_c == "NA")
+        filled_c <- non_obf_c[!is.na(non_obf_c) & non_obf_c != "" & non_obf_c != "NA"]
+        # Codes bruts "1"/"0" ou labels "Checked"/"Unchecked" selon export REDCap
+        checked_vals <- c("1", "Checked", "Oui", "Yes")
+        n_coches <- sum(filled_c %in% checked_vals)
         rows <- c(rows, list(
           data.frame(
             variable = field, statistique = label,
@@ -84,18 +88,19 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     }
 
     if (ftype == "yesno") {
-      n_oui <- sum(!is.na(vals) & vals == "1" & vals != "***")
-      n_non <- sum(!is.na(vals) & vals == "0" & vals != "***")
-      n_manq <- sum(is.na(vals) | vals == "" | vals == "NA" | vals == "***")
+      non_obf <- vals[vals != "***"]
+      n_manq <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
+      filled <- non_obf[!is.na(non_obf) & non_obf != "" & non_obf != "NA"]
+      freq <- sort(table(filled), decreasing = TRUE)
+      for (k in names(freq)) {
+        rows <- c(rows, list(
+          data.frame(
+            variable = field, statistique = k,
+            valeur = as.character(freq[[k]]), stringsAsFactors = FALSE
+          )
+        ))
+      }
       rows <- c(rows, list(
-        data.frame(
-          variable = field, statistique = "n_oui",
-          valeur = as.character(n_oui), stringsAsFactors = FALSE
-        ),
-        data.frame(
-          variable = field, statistique = "n_non",
-          valeur = as.character(n_non), stringsAsFactors = FALSE
-        ),
         data.frame(
           variable = field, statistique = "n_manquants",
           valeur = as.character(n_manq), stringsAsFactors = FALSE

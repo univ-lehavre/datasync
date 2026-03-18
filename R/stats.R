@@ -39,7 +39,8 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     if (is.na(branching)) branching <- ""
     # Filtrer les enregistrements applicables selon la branching_logic
     applicable_records <- resolve_branching_filter(records, branching, dict)
-    active_records <- if (!is.null(applicable_records)) applicable_records else records
+    conditional <- !is.null(applicable_records)
+    active_records <- if (conditional) applicable_records else records
     missing_label <- "n_manquants"
 
     if (ftype == "checkbox") {
@@ -85,6 +86,14 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     if (!(field %in% names(active_records))) next
     vals <- as.character(active_records[[field]])
 
+    # Pour les champs conditionnels, émettre n_applicable en tête
+    if (conditional) {
+      rows <- c(rows, list(data.frame(
+        variable = field, statistique = "n_applicable",
+        valeur = as.character(nrow(active_records)), stringsAsFactors = FALSE
+      )))
+    }
+
     if (ftype == "file") {
       non_empty <- vals[!is.na(vals) & vals != "" & vals != "NA" & vals != "***"]
       exts <- unique(tolower(tools::file_ext(non_empty)))
@@ -104,6 +113,7 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
 
     if (ftype %in% c("yesno", "radio", "dropdown", "sql")) {
       option_labels <- if (ftype %in% c("radio", "dropdown")) parse_choices(choices) else NULL
+      n_obf <- sum(vals == "***")
       non_obf <- vals[vals != "***"]
       n_missing <- sum(is.na(non_obf) | non_obf == "" | non_obf == "NA")
       filled <- non_obf[!is.na(non_obf) & non_obf != "" & non_obf != "NA"]
@@ -121,6 +131,12 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
           )
         ))
       }
+      if (n_obf > 0) {
+        rows <- c(rows, list(data.frame(
+          variable = field, statistique = "n_obfusques",
+          valeur = as.character(n_obf), stringsAsFactors = FALSE
+        )))
+      }
       rows <- c(rows, list(
         data.frame(
           variable = field, statistique = missing_label,
@@ -131,13 +147,22 @@ compute_instrument_stats <- function(records, dict, form_name, id_field) {
     }
 
     # text, notes, calc, slider, et autres
+    n_obf <- sum(vals == "***")
     n_rens <- sum(!is.na(vals) & vals != "" & vals != "NA" & vals != "***")
-    n_missing <- sum(is.na(vals) | vals == "" | vals == "NA" | vals == "***")
+    n_missing <- sum(is.na(vals) | vals == "" | vals == "NA")
     rows <- c(rows, list(
       data.frame(
         variable = field, statistique = "n_renseignes",
         valeur = as.character(n_rens), stringsAsFactors = FALSE
-      ),
+      )
+    ))
+    if (n_obf > 0) {
+      rows <- c(rows, list(data.frame(
+        variable = field, statistique = "n_obfusques",
+        valeur = as.character(n_obf), stringsAsFactors = FALSE
+      )))
+    }
+    rows <- c(rows, list(
       data.frame(
         variable = field, statistique = missing_label,
         valeur = as.character(n_missing), stringsAsFactors = FALSE
@@ -174,11 +199,11 @@ resolve_branching_filter <- function(records, branching, dict) {
   # Construire un filtre OR : au moins une condition vraie
   keep <- rep(FALSE, nrow(records))
   for (match in matches) {
-    parts <- regmatches(
+    cap <- regmatches(branching, regexec(
+      "\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'",
       match,
-      regexpr("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", match, perl = TRUE)
-    )
-    cap <- regmatches(match, regexec("\\[([^\\]]+)\\]\\s*=\\s*'([^']*)'", match))[[1]]
+      perl = TRUE
+    ))[[1]]
     parent_field <- cap[2]
     code <- cap[3]
     if (!(parent_field %in% names(records))) next

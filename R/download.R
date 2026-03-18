@@ -52,7 +52,8 @@ normalize_image_dpi <- function(image_path) {
 # ---------------------------------------------------------------------------
 write_instrument_csv <- function(path, records, fields, id_field,
                                  include_hashed_id = FALSE,
-                                 obfuscate_fields = character(0)) {
+                                 obfuscate_fields = character(0),
+                                 hashed_id_override = NULL) {
   if (is.null(records) || nrow(records) == 0) {
     return(invisible(NULL))
   }
@@ -64,7 +65,13 @@ write_instrument_csv <- function(path, records, fields, id_field,
       if (f %in% obfuscate_fields) {
         row[j] <- "***"
       } else if (f == "hashed_id" && include_hashed_id) {
-        row[j] <- if (id_field %in% names(records)) hash_id(as.character(records[[id_field]][i])) else ""
+        row[j] <- if (!is.null(hashed_id_override) && as.character(i) %in% names(hashed_id_override)) {
+          hashed_id_override[[as.character(i)]]
+        } else if (id_field %in% names(records)) {
+          hash_id(as.character(records[[id_field]][i]))
+        } else {
+          ""
+        }
       } else {
         val <- if (f %in% names(records)) as.character(records[[f]][i]) else ""
         row[j] <- gsub("[\r\n]+", " ", val)
@@ -302,6 +309,7 @@ download_instrument_data <- function(
   # Les champs identifiants sont obfusqués à "***" pour protéger l'identité,
   # mais leur présence/absence reste comptabilisée dans les statistiques.
   stats_only_records <- NULL
+  stats_only_hashed <- NULL
   if (length(stats_only_ids) > 0) {
     stats_only_records <- tryCatch(
       get_records_with_fields_and_ids(api_url, token, fields_to_download, stats_only_ids),
@@ -310,13 +318,14 @@ download_instrument_data <- function(
         NULL
       }
     )
-    # Calculer hashed_id AVANT l'obfuscation de id_field
+    # Stocker le mapping id → hashed_id AVANT l'obfuscation de id_field
     if (!is.null(stats_only_records) && id_field %in% names(stats_only_records)) {
-      stats_only_records[["hashed_id"]] <- vapply(
-        as.character(stats_only_records[[id_field]]),
-        hash_id,
-        character(1L)
+      stats_only_hashed <- setNames(
+        vapply(as.character(stats_only_records[[id_field]]), hash_id, character(1L)),
+        seq_len(nrow(stats_only_records))
       )
+    } else {
+      stats_only_hashed <- NULL
     }
     # Obfusquer tous les champs identifiants (id + identifiers)
     if (!is.null(stats_only_records)) {
@@ -341,13 +350,33 @@ download_instrument_data <- function(
   }
 
   # 8. Export CSV NLP : périmètre complet (tous niveaux), nominatifs obfusqués,
-  #    hashed_id non obfusqué — sert de source pour le pipeline NLP
-  if (!is.null(anon_all) && nrow(anon_all) > 0) {
-    csv_path <- file.path(data_dir, "nlp.csv")
+  #    hashed_id non obfusqué — sert de source pour le pipeline NLP.
+  #    Écrit source par source pour préserver le hashed_id des stats-only
+  #    (leur id_field est déjà "***" après obfuscation).
+  nlp_sources <- list(
+    list(records = result$ident_records, override = NULL),
+    list(records = result$pseudo_records, override = NULL),
+    list(records = result$anon_records, override = NULL),
+    list(records = stats_only_records, override = stats_only_hashed)
+  )
+  nlp_csv_path <- file.path(data_dir, "nlp.csv")
+  nlp_header_written <- FALSE
+  for (src in nlp_sources) {
+    if (is.null(src$records) || nrow(src$records) == 0) next
+    tmp_path <- tempfile(fileext = ".csv")
     write_instrument_csv(
-      csv_path, anon_all, all_csv_fields, id_field,
-      include_hashed_id = TRUE, obfuscate_fields = nominative_fields
+      tmp_path, src$records, all_csv_fields, id_field,
+      include_hashed_id = TRUE, obfuscate_fields = nominative_fields,
+      hashed_id_override = src$override
     )
+    tmp_lines <- readLines(tmp_path)
+    if (!nlp_header_written) {
+      writeLines(tmp_lines, nlp_csv_path)
+      nlp_header_written <- TRUE
+    } else {
+      # Append sans l'en-tête
+      write(tmp_lines[-1L], file = nlp_csv_path, append = TRUE)
+    }
   }
 
   result

@@ -743,89 +743,111 @@ def up() -> None:
         key = instrument_state_key(inst["name"], audience)
 
         if action == "ok":
-            console.print(f"  [green]✓[/green] {inst['label']:<35} en cache")
-            log_actions.append({"instrument": inst["name"], "status": "cached"})
-            continue
-
-        if action == "new":
-            symbol = "[blue]+[/blue]"
-            reason_str = d["reason"]
-        elif action == "modified":
-            symbol = "[yellow]~[/yellow]"
-            reason_str = d["reason"]
+            # Vérifier si le NLP est à jour malgré la mise en cache des données
+            inst_data_dir_ok = stack_instrument_dir(name, inst["name"])
+            nlp_entries_ok = [
+                e for e in (cfg.get("nlp_fields") or [])
+                if e["instrument"] == inst["name"]
+            ]
+            inst_files_ok = redcap_state.get(key, {}).get("files", {})
+            nlp_pending = any(
+                not (inst_data_dir_ok / f"nlp-{e['field']}").exists()
+                or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files_ok)
+                for e in nlp_entries_ok
+            )
+            if not nlp_pending:
+                console.print(f"  [green]✓[/green] {inst['label']:<35} en cache")
+                log_actions.append({"instrument": inst["name"], "status": "cached"})
+                continue
+            # NLP manquant : traiter cet instrument même s'il est en cache
+            console.print(f"  [yellow]~[/yellow] {inst['label']:<35} NLP manquant")
+            inst_data_dir = inst_data_dir_ok
+            skip_download = True
         else:
-            symbol = "[red]✗[/red]"
-            reason_str = d["reason"]
-        console.print(f"  {symbol} {inst['label']:<35} {reason_str}")
-        console.print(f"    téléchargement en cours...")
+            skip_download = False
 
-        inst_data_dir = stack_instrument_dir(name, inst["name"])
+        if not skip_download:
+            if action == "new":
+                symbol = "[blue]+[/blue]"
+                reason_str = d["reason"]
+            elif action == "modified":
+                symbol = "[yellow]~[/yellow]"
+                reason_str = d["reason"]
+            else:
+                symbol = "[red]✗[/red]"
+                reason_str = d["reason"]
+            console.print(f"  {symbol} {inst['label']:<35} {reason_str}")
+            console.print(f"    téléchargement en cours...")
+
+        inst_data_dir = stack_instrument_dir(name, inst["name"]) if not skip_download else inst_data_dir
         inst_data_dir.mkdir(parents=True, exist_ok=True)
 
-        for nlp_dir in inst_data_dir.glob("nlp-*/"):
-            shutil.rmtree(nlp_dir)
+        if not skip_download:
+            for nlp_dir in inst_data_dir.glob("nlp-*/"):
+                shutil.rmtree(nlp_dir)
 
-        dict_csv_path = stack_metadata_dir(name) / "dictionnaire.csv"
-        task = {
-            **api_cfg,
-            "audience": audience,
-            "instrument": inst,
-            "metadata_path": str(metadata_path),
-            "dict_path": str(dict_csv_path),
-            "data_dir": str(inst_data_dir),
-        }
-        dl_result = run_r_task("download_instrument.R", task)
+            dict_csv_path = stack_metadata_dir(name) / "dictionnaire.csv"
+            task = {
+                **api_cfg,
+                "audience": audience,
+                "instrument": inst,
+                "metadata_path": str(metadata_path),
+                "dict_path": str(dict_csv_path),
+                "data_dir": str(inst_data_dir),
+            }
+            dl_result = run_r_task("download_instrument.R", task)
 
-        if inst.get("file_fields") and dl_result.get("n_ident", 0) > 0:
-            ident_csv = inst_data_dir / "identifiables.csv"
-            if ident_csv.exists():
-                file_task = {
-                    **api_cfg,
-                    "ident_csv_path": str(ident_csv),
-                    "instrument": inst,
-                    "metadata_path": str(metadata_path),
-                    "data_dir": str(inst_data_dir),
-                    "files_dir": str(inst_data_dir / "files"),
-                }
-                file_result = run_r_task("download_files.R", file_task)
-                console.print(
-                    f"    [green]✓[/green] {file_result.get('n_files', 0)} fichier(s) téléchargé(s)"
-                )
+        if not skip_download:
+            if inst.get("file_fields") and dl_result.get("n_ident", 0) > 0:
+                ident_csv = inst_data_dir / "identifiables.csv"
+                if ident_csv.exists():
+                    file_task = {
+                        **api_cfg,
+                        "ident_csv_path": str(ident_csv),
+                        "instrument": inst,
+                        "metadata_path": str(metadata_path),
+                        "data_dir": str(inst_data_dir),
+                        "files_dir": str(inst_data_dir / "files"),
+                    }
+                    file_result = run_r_task("download_files.R", file_task)
+                    console.print(
+                        f"    [green]✓[/green] {file_result.get('n_files', 0)} fichier(s) téléchargé(s)"
+                    )
 
-        # Vérification SHA-256 — CSV
-        file_hashes = {
-            csv_path.name: sha256_file(csv_path)
-            for csv_path in compute_expected_csv_files(inst["name"], inst_data_dir)
-            if csv_path.exists()
-        }
-        # Vérification SHA-256 — fichiers binaires
-        bin_dir = inst_data_dir / "files"
-        if bin_dir.exists():
-            for bin_path in sorted(bin_dir.iterdir()):
-                if bin_path.is_file():
-                    file_hashes[f"files/{bin_path.name}"] = sha256_file(bin_path)
+            # Vérification SHA-256 — CSV
+            file_hashes = {
+                csv_path.name: sha256_file(csv_path)
+                for csv_path in compute_expected_csv_files(inst["name"], inst_data_dir)
+                if csv_path.exists()
+            }
+            # Vérification SHA-256 — fichiers binaires
+            bin_dir = inst_data_dir / "files"
+            if bin_dir.exists():
+                for bin_path in sorted(bin_dir.iterdir()):
+                    if bin_path.is_file():
+                        file_hashes[f"files/{bin_path.name}"] = sha256_file(bin_path)
 
-        redcap_state[key] = {
-            "downloaded_at": now,
-            "counts": {
-                "n_ident": dl_result.get("n_ident", 0),
-                "n_pseudo": dl_result.get("n_pseudo", 0),
-                "n_anon": dl_result.get("n_anon", 0),
-                "n_stats_no_response": dl_result.get("n_stats_no_response", 0),
-                "n_stats_audience_filtered": dl_result.get("n_stats_audience_filtered", 0),
-                "n_stats_aggregated": dl_result.get("n_stats_aggregated", 0),
-            },
-            "files": file_hashes,
-        }
-        save_redcap_state(name, redcap_state)
+            redcap_state[key] = {
+                "downloaded_at": now,
+                "counts": {
+                    "n_ident": dl_result.get("n_ident", 0),
+                    "n_pseudo": dl_result.get("n_pseudo", 0),
+                    "n_anon": dl_result.get("n_anon", 0),
+                    "n_stats_no_response": dl_result.get("n_stats_no_response", 0),
+                    "n_stats_audience_filtered": dl_result.get("n_stats_audience_filtered", 0),
+                    "n_stats_aggregated": dl_result.get("n_stats_aggregated", 0),
+                },
+                "files": file_hashes,
+            }
+            save_redcap_state(name, redcap_state)
 
-        console.print(
-            f"    [green]✓[/green] {dl_result.get('n_ident', 0)} ident, "
-            f"{dl_result.get('n_pseudo', 0)} pseudo, "
-            f"{dl_result.get('n_anon', 0)} anon"
-        )
-        if file_hashes:
-            console.print(f"    [green]✓[/green] {len(file_hashes)} CSV vérifié(s) (SHA-256)")
+            console.print(
+                f"    [green]✓[/green] {dl_result.get('n_ident', 0)} ident, "
+                f"{dl_result.get('n_pseudo', 0)} pseudo, "
+                f"{dl_result.get('n_anon', 0)} anon"
+            )
+            if file_hashes:
+                console.print(f"    [green]✓[/green] {len(file_hashes)} CSV vérifié(s) (SHA-256)")
 
         nlp_entries = [
             e for e in (cfg.get("nlp_fields") or [])

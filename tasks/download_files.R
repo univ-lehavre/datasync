@@ -33,13 +33,18 @@ if (length(config$file_fields) == 0L) {
 metadata <- fromJSON(task$metadata_path, simplifyDataFrame = TRUE)
 id_field <- metadata$field_name[1]
 
-data_dir <- if (!is.null(task$data_dir) && nchar(task$data_dir) > 0) task$data_dir else DATA_DIR
+files_dir <- if (!is.null(task$files_dir) && nchar(task$files_dir) > 0) {
+  task$files_dir
+} else {
+  data_dir <- if (!is.null(task$data_dir) && nchar(task$data_dir) > 0) task$data_dir else DATA_DIR
+  file.path(data_dir, "files")
+}
 
 ident_records <- read_csv(task$ident_csv_path, show_col_types = FALSE)
 
 files <- download_instrument_files(
   task$api_url, task$token, ident_records, id_field, config,
-  data_dir = data_dir
+  files_dir = files_dir
 )
 
 cat(toJSON(list(

@@ -76,12 +76,14 @@ write_instrument_csv <- function(path, records, fields, id_field, include_hashed
 # ---------------------------------------------------------------------------
 # Téléchargement des fichiers d'un instrument
 # ---------------------------------------------------------------------------
-download_instrument_files <- function(api_url, token, records, id_field, config, data_dir = DATA_DIR) {
+download_instrument_files <- function(
+    api_url, token, records, id_field, config,
+    files_dir = file.path(DATA_DIR, "files")) {
   if (length(config$file_fields) == 0 || is.null(records) || nrow(records) == 0) {
     return(character(0))
   }
 
-  files_dir <- file.path(data_dir, "fichiers", config$name)
+  files_dir <- file.path(files_dir, config$name)
   dir_create(files_dir, recurse = TRUE)
 
   downloaded <- character(0)
@@ -208,12 +210,12 @@ download_instrument_data <- function(api_url, token, metadata, id_field, audienc
 
     if (!is.null(records) && nrow(records) > 0) {
       csv_fields <- if (config$has_identifiers) {
-        c(id_field, identifiers, non_identifiers)
+        c(id_field, "hashed_id", identifiers, non_identifiers)
       } else {
-        c(id_field, name_fields, all_form_fields)
+        c(id_field, "hashed_id", name_fields, all_form_fields)
       }
       csv_path <- file.path(data_dir, sprintf("vague2_%s_identifiables.csv", config$name))
-      write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = FALSE)
+      write_instrument_csv(csv_path, records, csv_fields, id_field, include_hashed_id = TRUE)
       result$ident_records <- records
     }
   }

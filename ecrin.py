@@ -53,28 +53,36 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 
-def stack_data_dir(name: str) -> Path:
+def stack_root_dir(name: str) -> Path:
     return ECRIN_DIR / name
 
 
+def stack_downloads_dir(name: str) -> Path:
+    return stack_root_dir(name) / "downloads"
+
+
+def stack_data_dir(name: str) -> Path:
+    return stack_downloads_dir(name) / "data"
+
+
 def stack_metadata_dir(name: str) -> Path:
-    return stack_data_dir(name) / "metadata"
+    return stack_downloads_dir(name) / "metadata"
 
 
 def redcap_state_file(name: str) -> Path:
-    return stack_data_dir(name) / ".redcap.state.json"
+    return stack_root_dir(name) / ".redcap.state.json"
 
 
 def backup_dir(name: str) -> Path:
-    return stack_data_dir(name) / ".backup"
+    return stack_root_dir(name) / ".backup"
 
 
 def up_in_progress_file(name: str) -> Path:
-    return stack_data_dir(name) / ".up-in-progress.json"
+    return stack_root_dir(name) / ".up-in-progress.json"
 
 
 def up_log_file(name: str) -> Path:
-    return stack_data_dir(name) / ".up-log.json"
+    return stack_root_dir(name) / ".up-log.json"
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +144,7 @@ def load_stack_config(name: str) -> dict:
 
 
 def stack_state_path(name: str) -> Path:
-    return stack_data_dir(name) / "state.json"
+    return stack_root_dir(name) / "state.json"
 
 
 # ---------------------------------------------------------------------------
@@ -395,11 +403,12 @@ def compute_diff(cfg: dict, api_cfg: dict, stack_name: str, audience: str) -> li
         expected_csvs = compute_expected_csv_files(inst["name"], data_dir)
 
         # 1. Vérifier intégrité des fichiers existants (CSV + binaires)
+        downloads_dir = stack_downloads_dir(stack_name)
         if inst_state and inst_state.get("files"):
             corrupted_files = []
             for rel, expected_hash in inst_state["files"].items():
-                if rel.startswith("fichiers/"):
-                    full_path = data_dir / rel
+                if rel.startswith("files/"):
+                    full_path = downloads_dir / rel
                 else:
                     full_path = data_dir / rel
                 if full_path.exists():
@@ -726,6 +735,7 @@ def up() -> None:
                     "instrument": inst,
                     "metadata_path": str(metadata_path),
                     "data_dir": str(data_dir),
+                    "files_dir": str(stack_downloads_dir(name) / "files"),
                 }
                 file_result = run_r_task("download_files.R", file_task)
                 console.print(
@@ -739,11 +749,12 @@ def up() -> None:
             if csv_path.exists()
         }
         # Vérification SHA-256 — fichiers binaires
-        bin_dir = data_dir / "fichiers" / inst["name"]
+        downloads_dir = stack_downloads_dir(name)
+        bin_dir = downloads_dir / "files" / inst["name"]
         if bin_dir.exists():
             for bin_path in sorted(bin_dir.iterdir()):
                 if bin_path.is_file():
-                    file_hashes[f"fichiers/{inst['name']}/{bin_path.name}"] = sha256_file(bin_path)
+                    file_hashes[f"files/{inst['name']}/{bin_path.name}"] = sha256_file(bin_path)
 
         redcap_state[key] = {
             "downloaded_at": now,
@@ -829,11 +840,11 @@ def refresh() -> None:
             for csv_path in compute_expected_csv_files(inst_name, data_dir)
             if csv_path.exists()
         }
-        bin_dir = data_dir / "fichiers" / inst_name
+        bin_dir = stack_downloads_dir(name) / "files" / inst_name
         if bin_dir.exists():
             for bin_path in sorted(bin_dir.iterdir()):
                 if bin_path.is_file():
-                    file_hashes[f"fichiers/{inst_name}/{bin_path.name}"] = sha256_file(bin_path)
+                    file_hashes[f"files/{inst_name}/{bin_path.name}"] = sha256_file(bin_path)
         if file_hashes != inst_state.get("files", {}):
             redcap_state[key]["files"] = file_hashes
             updated += 1
@@ -1014,29 +1025,25 @@ def destroy(
 ) -> None:
     """Détruit toutes les données du stack actif."""
     name = require_active_stack()
-    data_dir = stack_data_dir(name)
+    root_dir = stack_root_dir(name)
     state_file = stack_state_path(name)
 
     console.print(f"\n[bold]Destroying stack[/bold] [cyan]{name}[/cyan]\n")
 
-    if not data_dir.exists() and not state_file.exists():
+    if not root_dir.exists() and not state_file.exists():
         console.print("[yellow]Rien à supprimer pour ce stack.[/yellow]")
         return
 
     console.print("  Sera supprimé :")
-    if data_dir.exists():
-        console.print(f"    [red]-[/red] {data_dir}/ (données + state + backup)")
-    if state_file.exists():
-        console.print(f"    [red]-[/red] {state_file}")
+    if root_dir.exists():
+        console.print(f"    [red]-[/red] {root_dir}/ (données + state + backup)")
     console.print()
 
     if not yes:
         typer.confirm("Confirmer la destruction ?", abort=True)
 
-    if data_dir.exists():
-        shutil.rmtree(data_dir)
-    if state_file.exists():
-        state_file.unlink()
+    if root_dir.exists():
+        shutil.rmtree(root_dir)
 
     console.print(f"[green]✓[/green] Stack [cyan]{name}[/cyan] détruit.\n")
 
@@ -1059,7 +1066,7 @@ def state() -> None:
     console.print(f"\n[bold]Stack actif :[/bold] [cyan]{name}[/cyan]")
     if st:
         console.print(f"  Dernier up : {st.get('last_up', '—')[:19]}")
-        console.print(f"  Données    : {stack_data_dir(name)}")
+        console.print(f"  Données    : {stack_downloads_dir(name)}")
     else:
         console.print("  [yellow]Jamais exécuté.[/yellow]")
 

@@ -92,10 +92,11 @@ load_and_filter_texts <- function(csv_path, field, id_field) {
 detect_languages <- function(df) {
   langs <- cld3::detect_language(df$text)
   n_tokens <- lengths(strsplit(trimws(df$text), "\\s+"))
-  short <- n_tokens < 30L
+  short <- nchar(trimws(df$text)) < 50L
   langs[is.na(langs) | short] <- "unknown"
   df$langue <- langs
   df$n_tokens <- n_tokens
+  df$n_chars <- nchar(trimws(df$text))
   df
 }
 
@@ -322,7 +323,7 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir) {
 
   # Export 00 : source avec langue et n_tokens (avant split par langue)
   write_csv(
-    df[, c("id", "langue", "n_tokens", "text"), drop = FALSE],
+    df[, c("id", "langue", "n_tokens", "n_chars", "text"), drop = FALSE],
     file.path(output_dir, "00_source.csv")
   )
 

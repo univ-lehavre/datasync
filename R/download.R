@@ -310,6 +310,14 @@ download_instrument_data <- function(
         NULL
       }
     )
+    # Calculer hashed_id AVANT l'obfuscation de id_field
+    if (!is.null(stats_only_records) && id_field %in% names(stats_only_records)) {
+      stats_only_records[["hashed_id"]] <- vapply(
+        as.character(stats_only_records[[id_field]]),
+        hash_id,
+        character(1L)
+      )
+    }
     # Obfusquer tous les champs identifiants (id + identifiers)
     if (!is.null(stats_only_records)) {
       for (col in nominative_fields) {
@@ -330,6 +338,16 @@ download_instrument_data <- function(
     if (!is.null(stats_df) && nrow(stats_df) > 0) {
       write_csv(stats_df, csv_path)
     }
+  }
+
+  # 8. Export CSV NLP : périmètre complet (tous niveaux), nominatifs obfusqués,
+  #    hashed_id non obfusqué — sert de source pour le pipeline NLP
+  if (!is.null(anon_all) && nrow(anon_all) > 0) {
+    csv_path <- file.path(data_dir, "nlp.csv")
+    write_instrument_csv(
+      csv_path, anon_all, all_csv_fields, id_field,
+      include_hashed_id = TRUE, obfuscate_fields = nominative_fields
+    )
   }
 
   result

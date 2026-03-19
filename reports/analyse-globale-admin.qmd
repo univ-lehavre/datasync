@@ -482,6 +482,231 @@ htmltools::browsable(htmltools::HTML(paste0(
 )))
 ```
 
+## Questions de recherche
+
+Les questions de recherche ont été analysées par modélisation thématique (LDA, 5 topics) et pondération TF-IDF.
+
+```{r}
+#| label: nlp-setup
+#| include: false
+nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                     "research_questions", "nlp-research_questions")
+
+lda_topics  <- read_csv(file.path(nlp_dir, "lda_topics.csv"),           show_col_types = FALSE)
+lda_indiv   <- read_csv(file.path(nlp_dir, "lda_individus_enrichi.csv"), show_col_types = FALSE)
+tfidf       <- read_csv(file.path(nlp_dir, "tfidf.csv"),                 show_col_types = FALSE)
+
+topic_colors <- c("1" = "#e41a1c", "2" = "#377eb8", "3" = "#4daf4a",
+                  "4" = "#ff7f00", "5" = "#984ea3")
+
+lda_indiv <- lda_indiv |>
+  mutate(
+    full_name     = paste0(str_to_title(first_name), " ", str_to_title(last_name)),
+    topic_dominant = as.character(topic_dominant)
+  )
+```
+
+### Top termes par topic
+
+```{r}
+#| label: nlp-top-termes
+#| fig-width: 10
+#| fig-height: 7
+lda_topics |>
+  filter(langue == "en") |>
+  mutate(topic = paste("Topic", topic)) |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  mutate(term = paste0(term, "__", topic),
+         term = fct_reorder(term, beta)) |>
+  ggplot(aes(x = term, y = beta, fill = topic)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  facet_wrap(~ topic, scales = "free_y", ncol = 5) +
+  coord_flip() +
+  scale_x_discrete(labels = function(x) sub("__.*$", "", x)) +
+  scale_fill_manual(values = setNames(unname(topic_colors), paste("Topic", 1:5))) +
+  labs(x = NULL, y = "Probabilité (β)", title = "Top 10 termes par topic (LDA)") +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold"))
+```
+
+### Nuages de mots par topic
+
+```{r}
+#| label: nlp-wordcloud
+#| fig-width: 10
+#| fig-height: 8
+#| warning: false
+par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+for (t in 1:5) {
+  df <- lda_topics |>
+    filter(langue == "en", topic == t) |>
+    select(word = term, freq = beta) |>
+    arrange(desc(freq))
+  wordcloud::wordcloud(
+    words = df$word, freq = df$freq,
+    max.words = 10, scale = c(3, 0.8),
+    colors = colorRampPalette(c("grey80", topic_colors[[as.character(t)]]))(10),
+    main = paste("Topic", t)
+  )
+  title(paste("Topic", t), line = 0.5)
+}
+```
+
+### Heatmap topics × chercheurs
+
+```{r}
+#| label: nlp-heatmap
+#| fig-width: 10
+#| fig-height: 7
+lda_indiv |>
+  select(full_name, topic_dominant, gamma_1:gamma_5) |>
+  pivot_longer(gamma_1:gamma_5, names_to = "topic", values_to = "gamma") |>
+  mutate(
+    topic     = paste("Topic", str_extract(topic, "\\d")),
+    full_name = factor(full_name, levels = lda_indiv |>
+                         arrange(topic_dominant, full_name) |> pull(full_name))
+  ) |>
+  ggplot(aes(x = topic, y = full_name, fill = gamma)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = if_else(gamma > 0.15, round(gamma, 2), NA_real_)),
+            size = 3, color = "white") +
+  scale_fill_gradient(low = "#f7f7f7", high = "#2166ac", name = "γ") +
+  labs(x = NULL, y = NULL, title = "Appartenance thématique par chercheur (γ)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(face = "bold"),
+        panel.grid  = element_blank())
+```
+
+### TF-IDF — termes discriminants
+
+```{r}
+#| label: nlp-tfidf
+#| fig-width: 9
+#| fig-height: 7
+tfidf |>
+  filter(langue == "en") |>
+  slice_max(tf_idf_moyen, n = 30) |>
+  mutate(token = fct_reorder(token, tf_idf_moyen)) |>
+  ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
+  geom_point(alpha = 0.85) +
+  coord_flip() +
+  scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb docs") +
+  scale_size_continuous(range = c(3, 10), name = "Nb docs") +
+  guides(size = "none") +
+  labs(x = NULL, y = "TF-IDF moyen", title = "Top 30 termes discriminants (TF-IDF)") +
+  theme_minimal()
+```
+
+### Réseau chercheurs — topics
+
+```{r}
+#| label: nlp-network
+library(visNetwork)
+
+nodes_topics <- tibble(
+  id    = paste0("t", 1:5),
+  label = paste("Topic", 1:5),
+  group = "topic",
+  color = unname(topic_colors),
+  shape = "ellipse",
+  size  = 30,
+  font.size = 16
+)
+
+nodes_chercheurs <- lda_indiv |>
+  mutate(id = paste0("c", row_number())) |>
+  select(id, label = full_name, topic_dominant) |>
+  mutate(
+    group = "chercheur",
+    color = topic_colors[topic_dominant],
+    shape = "dot",
+    size  = 18,
+    font.size = 13
+  )
+
+nodes <- bind_rows(nodes_topics, nodes_chercheurs |> select(-topic_dominant))
+
+gamma_long <- lda_indiv |>
+  mutate(from = paste0("c", row_number())) |>
+  select(from, gamma_1:gamma_5) |>
+  pivot_longer(-from, names_to = "topic", values_to = "gamma") |>
+  mutate(to = paste0("t", str_extract(topic, "\\d"))) |>
+  filter(gamma > 0.05) |>
+  mutate(value = round(gamma * 10, 1), title = paste0("γ = ", round(gamma, 2)))
+
+edges <- gamma_long |> select(from, to, value, title)
+
+visNetwork(nodes, edges, height = "550px", width = "100%") |>
+  visPhysics(
+    solver = "forceAtlas2Based",
+    forceAtlas2Based = list(gravitationalConstant = -80, springLength = 120)
+  ) |>
+  visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE)) |>
+  visLegend(addNodes = list(
+    list(label = "Topic",     shape = "ellipse", color = "#aaa"),
+    list(label = "Chercheur", shape = "dot",     color = "#aaa")
+  ), useGroups = FALSE) |>
+  visInteraction(navigationButtons = TRUE)
+```
+
+## Publications
+
+
+
+## Proposition de projet
+
+### Intégration des projets dans ceux de l’Université
+
+```{r}
+#| label: ecr-eunicoast
+#| fig-width: 10
+#| fig-height: 5
+labels_ecr <- c(
+  "ecr_integration___1" = "Enjeux maritimes et portuaires",
+  "ecr_integration___2" = "La ville de demain : architecture, urbanisme,\nconstruction durable et design",
+  "ecr_integration___3" = "Transitions, risques et aléas"
+)
+
+labels_eunicoast <- c(
+  "eunicoast_integration___1" = "Identités, savoirs locaux et\npatrimoine culturel",
+  "eunicoast_integration___2" = "Économie circulaire bleue, logistique\nportuaire et tourisme bleu durable",
+  "eunicoast_integration___3" = "Gouvernance, planification,\ngestion et surveillance",
+  "eunicoast_integration___4" = "Santé, biodiversité et solutions\nfondées sur la nature",
+  "eunicoast_integration___5" = "Solutions ingéniées et numériques\npour les infrastructures côtières"
+)
+
+completed <- data_raw |> filter(researcher_profile_complete == 2)
+n_proj <- nrow(completed)
+
+plot_integration <- function(data, labels, titre, fill_color) {
+  cols <- names(labels)
+  data |>
+    select(all_of(cols)) |>
+    summarise(across(everything(), ~ sum(as.integer(.x) == 1, na.rm = TRUE))) |>
+    pivot_longer(everything(), names_to = "variable", values_to = "n") |>
+    mutate(
+      label = labels[variable],
+      label = factor(label, levels = rev(labels)),
+      pct   = n / n_proj
+    ) |>
+    ggplot(aes(x = label, y = n)) +
+    geom_col(fill = fill_color, alpha = 0.85, width = 0.6) +
+    geom_text(aes(label = paste0(n, " (", round(pct * 100), "%)")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    scale_y_continuous(limits = c(0, n_proj + 2), breaks = scales::pretty_breaks()) +
+    labs(title = titre, x = NULL, y = paste0("Nombre de projets (N=", n_proj, ")")) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold"))
+}
+
+p_ecr      <- plot_integration(completed, labels_ecr,      "Intégration ECR",      "#fd7e14")
+p_eunicoast <- plot_integration(completed, labels_eunicoast, "Intégration EUNICoast", "#e83e8c")
+
+gridExtra::grid.arrange(p_ecr, p_eunicoast, ncol = 2)
+```
+
 ## Fiches chercheurs
 
 ```{r}
@@ -712,54 +937,4 @@ cards_html <- purrr::map_chr(prof |> arrange(last_name, first_name) |> pull(user
 })
 
 htmltools::browsable(htmltools::HTML(paste(cards_html, collapse = "\n")))
-```
-
-## Intégration des projets dans ceux de l’Université
-
-```{r}
-#| label: ecr-eunicoast
-#| fig-width: 10
-#| fig-height: 5
-labels_ecr <- c(
-  "ecr_integration___1" = "Enjeux maritimes et portuaires",
-  "ecr_integration___2" = "La ville de demain : architecture, urbanisme,\nconstruction durable et design",
-  "ecr_integration___3" = "Transitions, risques et aléas"
-)
-
-labels_eunicoast <- c(
-  "eunicoast_integration___1" = "Identités, savoirs locaux et\npatrimoine culturel",
-  "eunicoast_integration___2" = "Économie circulaire bleue, logistique\nportuaire et tourisme bleu durable",
-  "eunicoast_integration___3" = "Gouvernance, planification,\ngestion et surveillance",
-  "eunicoast_integration___4" = "Santé, biodiversité et solutions\nfondées sur la nature",
-  "eunicoast_integration___5" = "Solutions ingéniées et numériques\npour les infrastructures côtières"
-)
-
-completed <- data_raw |> filter(researcher_profile_complete == 2)
-n_proj <- nrow(completed)
-
-plot_integration <- function(data, labels, titre, fill_color) {
-  cols <- names(labels)
-  data |>
-    select(all_of(cols)) |>
-    summarise(across(everything(), ~ sum(as.integer(.x) == 1, na.rm = TRUE))) |>
-    pivot_longer(everything(), names_to = "variable", values_to = "n") |>
-    mutate(
-      label = labels[variable],
-      label = factor(label, levels = rev(labels)),
-      pct   = n / n_proj
-    ) |>
-    ggplot(aes(x = label, y = n)) +
-    geom_col(fill = fill_color, alpha = 0.85, width = 0.6) +
-    geom_text(aes(label = paste0(n, " (", round(pct * 100), "%)")), hjust = -0.1, size = 3.5) +
-    coord_flip() +
-    scale_y_continuous(limits = c(0, n_proj + 2), breaks = scales::pretty_breaks()) +
-    labs(title = titre, x = NULL, y = paste0("Nombre de projets (N=", n_proj, ")")) +
-    theme_minimal() +
-    theme(plot.title = element_text(face = "bold"))
-}
-
-p_ecr      <- plot_integration(completed, labels_ecr,      "Intégration ECR",      "#fd7e14")
-p_eunicoast <- plot_integration(completed, labels_eunicoast, "Intégration EUNICoast", "#e83e8c")
-
-gridExtra::grid.arrange(p_ecr, p_eunicoast, ncol = 2)
 ```

@@ -2,7 +2,7 @@
 .env
 
 # Rapports générés
-reports/
+reports/*.html
 
 # Build
 bin/

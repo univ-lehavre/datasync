@@ -21,3 +21,8 @@ instruments: auto
 nlp_fields:
   - instrument: research_questions
     field: research_questions
+
+# Champs fichiers à extraire et analyser par NLP (instrument: champ fichier REDCap)
+file_fields_nlp:
+  - instrument: publications
+    field: publications

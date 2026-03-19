@@ -18,12 +18,14 @@ Usage:
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -190,6 +192,58 @@ def run_r_task(script: str, task: dict) -> dict:
             console.print(f"[red]Sortie R invalide ({script}):\n{stdout}[/red]")
             raise typer.Exit(1)
         return json.loads(match.group())
+    finally:
+        os.unlink(tmp_path)
+
+
+def _python_env() -> dict:
+    """Environnement pour les sous-processus Python : injecte DYLD_LIBRARY_PATH si nécessaire."""
+    env = os.environ.copy()
+    try:
+        import ctypes.util
+        if not ctypes.util.find_library("magic"):
+            brew = subprocess.run(
+                ["brew", "--prefix", "libmagic"],
+                capture_output=True, text=True
+            )
+            if brew.returncode == 0:
+                lib_dir = brew.stdout.strip() + "/lib"
+                existing = env.get("DYLD_LIBRARY_PATH", "")
+                env["DYLD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else lib_dir
+    except Exception:
+        pass
+    return env
+
+
+def run_python_task(script: str, task: dict) -> dict:
+    """Exécute un script Python tasks/ avec un JSON de tâche, retourne le JSON de sortie."""
+    script_path = r_tasks_dir() / script
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as tmp:
+        json.dump(task, tmp, ensure_ascii=False)
+        tmp_path = tmp.name
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-W", "ignore", str(script_path), "--task", tmp_path],
+            capture_output=True,
+            text=True,
+            env=_python_env(),
+        )
+        if result.returncode != 0:
+            console.print(f"[red]Erreur Python ({script}):[/red]\n{result.stderr}")
+            raise typer.Exit(1)
+        stdout = result.stdout.strip()
+        # Cherche le premier '{' et tente de parser le JSON depuis ce point
+        start = stdout.find("{")
+        if start != -1:
+            try:
+                return json.loads(stdout[start:])
+            except json.JSONDecodeError:
+                pass
+        console.print(f"[red]Sortie Python invalide ({script}):\n{stdout}[/red]")
+        raise typer.Exit(1)
     finally:
         os.unlink(tmp_path)
 
@@ -749,13 +803,22 @@ def up() -> None:
                 e for e in (cfg.get("nlp_fields") or [])
                 if e["instrument"] == inst["name"]
             ]
+            file_nlp_entries_ok = [
+                e for e in (cfg.get("file_fields_nlp") or [])
+                if e["instrument"] == inst["name"]
+            ]
             inst_files_ok = redcap_state.get(key, {}).get("files", {})
             nlp_pending = any(
                 not (inst_data_dir_ok / f"nlp-{e['field']}").exists()
                 or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files_ok)
                 for e in nlp_entries_ok
             )
-            if not nlp_pending:
+            file_extract_pending = any(
+                not (inst_data_dir_ok / f"extracted-{e['field']}").exists()
+                or not any(k.startswith(f"extracted-{e['field']}/") for k in inst_files_ok)
+                for e in file_nlp_entries_ok
+            )
+            if not nlp_pending and not file_extract_pending:
                 console.print(f"  [green]✓[/green] {inst['label']:<35} en cache")
                 log_actions.append({"instrument": inst["name"], "status": "cached"})
                 continue
@@ -864,7 +927,7 @@ def up() -> None:
                     None,
                 )
                 profile_ident = (
-                    stack_instrument_dir(stack_name, profile_inst["instrument_name"]) / "identifiables.csv"
+                    stack_instrument_dir(name, profile_inst["instrument_name"]) / "identifiables.csv"
                     if profile_inst
                     else None
                 )
@@ -891,6 +954,124 @@ def up() -> None:
                 redcap_state[key]["files"].update(nlp_hashes)
                 save_redcap_state(name, redcap_state)
                 console.print(f"    [green]✓[/green] NLP {field} — {lang_summary or 'vide'}")
+
+        file_nlp_entries = [
+            e for e in (cfg.get("file_fields_nlp") or [])
+            if e["instrument"] == inst["name"]
+        ]
+        files_dir = inst_data_dir / "files"
+        if file_nlp_entries and files_dir.exists():
+            for entry in file_nlp_entries:
+                field = entry["field"]
+                extracted_dir = inst_data_dir / f"extracted-{field}"
+                extracted_dir.mkdir(parents=True, exist_ok=True)
+                extract_task = {
+                    "files_dir": str(files_dir),
+                    "output_dir": str(extracted_dir),
+                    "field": field,
+                }
+                extract_result = run_r_task("extract_files_text.R", extract_task)
+                n_ext = extract_result.get("n_extracted", 0)
+                n_skip = extract_result.get("n_skipped", 0)
+
+                # Extraction biblio via refextract (Python) sur chaque fichier .txt
+                texts_dir = extracted_dir / "texts"
+                n_biblio = 0
+                all_refs: list[dict] = []
+                if texts_dir.exists():
+                    for txt_file in sorted(texts_dir.glob("*.txt")):
+                        hashed_id = txt_file.stem
+                        biblio_result = run_python_task("extract_biblio.py", {
+                            "text_path": str(txt_file),
+                            "hashed_id": hashed_id,
+                        })
+                        refs = biblio_result.get("refs") or []
+                        all_refs.extend(refs)
+                        n_biblio += len(refs)
+                if all_refs:
+                    biblio_csv = extracted_dir / "biblio_refs.csv"
+                    fieldnames = ["ref_id", "hashed_id", "raw", "title", "author", "year", "journal", "doi", "reportnum"]
+                    with biblio_csv.open("w", newline="", encoding="utf-8") as fh:
+                        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+                        writer.writeheader()
+                        for i, ref in enumerate(all_refs):
+                            writer.writerow({"ref_id": i, **ref})
+
+                    # Co-auteurs : une ligne par auteur individuel
+                    authors_csv = extracted_dir / "biblio_authors.csv"
+                    with authors_csv.open("w", newline="", encoding="utf-8") as fh:
+                        writer = csv.DictWriter(fh, fieldnames=["ref_id", "hashed_id", "author"])
+                        writer.writeheader()
+                        for ref_idx, ref in enumerate(all_refs):
+                            raw_author = (ref.get("author") or "").strip()
+                            if not raw_author:
+                                continue
+                            def _split_one(s: str) -> list[str]:
+                                s = s.strip().rstrip(",").strip()
+                                comma_parts = [p.strip() for p in s.split(",") if p.strip()]
+                                if len(comma_parts) <= 1 or not all(len(p.split()) <= 5 for p in comma_parts):
+                                    return [s]
+                                # APA "Last, F." : 1er segment sans initiale en tête
+                                apa_like = (not re.match(r"^[A-Z]\.", comma_parts[0])
+                                            and len(comma_parts) >= 2
+                                            and re.match(r"^[A-Z][\.\-]", comma_parts[1]))
+                                if apa_like:
+                                    names, ci = [], 0
+                                    while ci < len(comma_parts):
+                                        name = comma_parts[ci]
+                                        if ci + 1 < len(comma_parts) and re.match(r"^[A-Z][\.\-]", comma_parts[ci + 1]):
+                                            name = f"{name}, {comma_parts[ci + 1]}"
+                                            ci += 2
+                                        else:
+                                            ci += 1
+                                        names.append(name)
+                                    return names if len(names) > 1 else [s]
+                                return comma_parts  # IEEE : chaque segment = un auteur
+
+                            parts = []
+                            for and_part in re.split(r"\s+and\s+", raw_author, flags=re.IGNORECASE):
+                                parts.extend(_split_one(and_part))
+                            for author in parts:
+                                author = author.strip().rstrip(".")
+                                if author:
+                                    writer.writerow({"ref_id": ref_idx, "hashed_id": ref.get("hashed_id"), "author": author})
+
+                console.print(
+                    f"    [green]✓[/green] Extraction {field} — "
+                    f"{n_ext} fichier(s), {n_biblio} réf(s) biblio"
+                    + (f", {n_skip} ignoré(s)" if n_skip else "")
+                )
+                biblio_csv = extracted_dir / "biblio_refs.csv"
+                if biblio_csv.exists() and n_biblio > 0:
+                    nlp_output_dir = inst_data_dir / f"nlp-{field}"
+                    nlp_output_dir.mkdir(parents=True, exist_ok=True)
+                    nlp_task = {
+                        "csv_path": str(biblio_csv),
+                        "field": "title",
+                        "id_field": "ref_id",
+                        "output_dir": str(nlp_output_dir),
+                    }
+                    nlp_result = run_r_task("nlp_text.R", nlp_task)
+                    langues = nlp_result.get("langues", {})
+                    lda_k = nlp_result.get("lda_k", {})
+                    lang_summary = ", ".join(
+                        f"{lang}:{n}(k={lda_k[lang]})" if lang in lda_k else f"{lang}:{n}"
+                        for lang, n in langues.items()
+                    )
+                    console.print(f"    [green]✓[/green] NLP {field} (fichiers) — {lang_summary or 'vide'}")
+                    nlp_hashes = {
+                        f"nlp-{field}/{f.name}": sha256_file(f)
+                        for f in nlp_output_dir.iterdir()
+                        if f.is_file()
+                    }
+                    redcap_state[key]["files"].update(nlp_hashes)
+                extracted_hashes = {
+                    f"extracted-{field}/{f.relative_to(extracted_dir)}": sha256_file(f)
+                    for f in extracted_dir.rglob("*")
+                    if f.is_file()
+                }
+                redcap_state[key]["files"].update(extracted_hashes)
+                save_redcap_state(name, redcap_state)
 
         log_actions.append({"instrument": inst["name"], "status": action})
 

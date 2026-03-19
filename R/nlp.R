@@ -71,8 +71,8 @@ load_and_filter_texts <- function(csv_path, field, id_field) {
   vals <- as.character(df[[field]])
   keep <- !is.na(vals) & vals != "" & vals != "NA" & vals != "***"
   df <- df[keep, , drop = FALSE]
-  # Utilise hashed_id si disponible et non obfusqué, sinon id_field
-  id_col <- if ("hashed_id" %in% names(df)) {
+  # Utilise hashed_id à la place de record_id si disponible et non obfusqué
+  id_col <- if (id_field == "record_id" && "hashed_id" %in% names(df)) {
     hids <- as.character(df[["hashed_id"]])
     if (all(hids == "***" | is.na(hids))) id_field else "hashed_id"
   } else {
@@ -399,9 +399,9 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir,
     stringsAsFactors = FALSE
   )
 
-  tfidf_df <- if (length(all_tfidf) > 0L) do.call(rbind, all_tfidf) else empty_tfidf
-  topics_df <- if (length(all_topics) > 0L) do.call(rbind, all_topics) else empty_topics
-  individus_df <- if (length(all_individus) > 0L) do.call(rbind, all_individus) else empty_individus
+  tfidf_df <- if (length(all_tfidf) > 0L) dplyr::bind_rows(all_tfidf) else empty_tfidf
+  topics_df <- if (length(all_topics) > 0L) dplyr::bind_rows(all_topics) else empty_topics
+  individus_df <- if (length(all_individus) > 0L) dplyr::bind_rows(all_individus) else empty_individus
 
   write_csv(tfidf_df, file.path(output_dir, "tfidf.csv"))
   write_csv(topics_df, file.path(output_dir, "lda_topics.csv"))

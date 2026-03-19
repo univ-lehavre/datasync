@@ -6,6 +6,8 @@ dependencies = [
     "typer>=0.12",
     "pyyaml>=6.0",
     "rich>=13.0",
+    "refextract>=1.1",
+    "setuptools>=82.0.1",
 ]
 
 [tool.ruff]

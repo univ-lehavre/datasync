@@ -372,87 +372,60 @@ Les chercheurs adopte à plus de 80% pour une confidentialité minimale de leurs
 
 Nous pourrions envisager une disposition commune pour toutes les données recueillies : identification nominative réservé à un auditoire de chercheurs.
 
-## Intégration ECR et EUNICoast
-
-```{r}
-#| label: ecr-eunicoast
-#| fig-width: 10
-#| fig-height: 5
-labels_ecr <- c(
-  "ecr_integration___1" = "Enjeux maritimes et portuaires",
-  "ecr_integration___2" = "La ville de demain : architecture, urbanisme,\nconstruction durable et design",
-  "ecr_integration___3" = "Transitions, risques et aléas"
-)
-
-labels_eunicoast <- c(
-  "eunicoast_integration___1" = "Identités, savoirs locaux et\npatrimoine culturel",
-  "eunicoast_integration___2" = "Économie circulaire bleue, logistique\nportuaire et tourisme bleu durable",
-  "eunicoast_integration___3" = "Gouvernance, planification,\ngestion et surveillance",
-  "eunicoast_integration___4" = "Santé, biodiversité et solutions\nfondées sur la nature",
-  "eunicoast_integration___5" = "Solutions ingéniées et numériques\npour les infrastructures côtières"
-)
-
-completed <- data_raw |> filter(researcher_profile_complete == 2)
-n_proj <- nrow(completed)
-
-plot_integration <- function(data, labels, titre, fill_color) {
-  cols <- names(labels)
-  data |>
-    select(all_of(cols)) |>
-    summarise(across(everything(), ~ sum(as.integer(.x) == 1, na.rm = TRUE))) |>
-    pivot_longer(everything(), names_to = "variable", values_to = "n") |>
-    mutate(
-      label = labels[variable],
-      label = factor(label, levels = rev(labels)),
-      pct   = n / n_proj
-    ) |>
-    ggplot(aes(x = label, y = n)) +
-    geom_col(fill = fill_color, alpha = 0.85, width = 0.6) +
-    geom_text(aes(label = paste0(n, " (", round(pct * 100), "%)")), hjust = -0.1, size = 3.5) +
-    coord_flip() +
-    scale_y_continuous(limits = c(0, n_proj + 2), breaks = scales::pretty_breaks()) +
-    labs(title = titre, x = NULL, y = paste0("Nombre de projets (N=", n_proj, ")")) +
-    theme_minimal() +
-    theme(plot.title = element_text(face = "bold"))
-}
-
-p_ecr      <- plot_integration(completed, labels_ecr,      "Intégration ECR",      "#fd7e14")
-p_eunicoast <- plot_integration(completed, labels_eunicoast, "Intégration EUNICoast", "#e83e8c")
-
-gridExtra::grid.arrange(p_ecr, p_eunicoast, ncol = 2)
-```
-
-### Conclusion
-
-Les propositions de projet s'inscrivent dans les thématiques ECR et EUNICoast selon des proportions variables. Ces informations permettent d'orienter les collaborations et les appels à projets ciblés.
-
 ## Profil du chercheur
-
-### Portrait
 
 ```{r}
 #| label: portrait-choix-camembert
-#| fig-width: 5
+#| fig-width: 10
 #| fig-height: 5
 choix_portrait <- c(
-  "1" = "Rien",
+  "1" = "Avatar généré",
   "2" = "Photo de moi",
-  "3" = "Avatar généré"
+  "3" = "Rien"
 )
 
-data_raw |>
+pie_portrait <- data_raw |>
   filter(researcher_profile_complete == 2) |>
   mutate(choix = choix_portrait[as.character(portrait_choice)]) |>
   count(choix) |>
-  mutate(pct = n / sum(n), label = paste0(choix, "\n", n, " (", round(pct * 100), "%)")) |>
+  mutate(pct = n / sum(n), label = paste0(n, "\n(", round(pct * 100), "%)")) |>
   ggplot(aes(x = "", y = n, fill = choix)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
   geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
-  scale_fill_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2", guide = guide_legend(nrow = 2)) +
   labs(title = "Choix du portrait", fill = NULL) +
   theme_void() +
-  theme(legend.position = "none")
+  theme(legend.position = "bottom")
+
+prof_inst <- read_csv(
+  file.path(project_dir, "..", ".ecrin", "admin", "downloads", "researcher_profile", "identifiables.csv"),
+  show_col_types = FALSE
+)
+
+abrev_inst <- c(
+  "Université Le Havre Normandie (ULHN)" = "ULHN",
+  "Centre National de la Recherche Scientifique (CNRS)" = "CNRS",
+  "Universidade dos Açores (UAC)" = "UAC"
+)
+
+pie_institution <- prof_inst |>
+  mutate(
+    inst_full = if_else(!is.na(institution_other) & institution_other != "", institution_other, institution),
+    inst = if_else(inst_full %in% names(abrev_inst), abrev_inst[inst_full], inst_full)
+  ) |>
+  count(inst) |>
+  mutate(pct = n / sum(n), label = paste0(n, "\n(", round(pct * 100), "%)")) |>
+  ggplot(aes(x = "", y = n, fill = inst)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = "Affiliations", fill = NULL) +
+  theme_void() +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(pie_portrait, pie_institution, ncol = 2)
 ```
 
 ### Trombinoscope
@@ -467,23 +440,38 @@ identifiables <- read_csv(
 
 img_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads", "researcher_profile", "files")
 
-portraits <- identifiables |>
-  filter(!is.na(portrait) & portrait != "") |>
+all_profiles <- identifiables |>
   arrange(last_name, first_name) |>
   mutate(
-    img_file = paste0(hashed_id, "_portrait.", tools::file_ext(portrait)),
-    img_path = file.path(img_dir, img_file),
-    exists   = file.exists(img_path)
-  ) |>
-  filter(exists)
+    middle_part = if_else(!is.na(middle_name) & middle_name != "", paste0(" ", middle_name), ""),
+    full_name   = paste0(str_to_title(first_name), middle_part, " ", str_to_title(last_name)),
+    img_src = case_when(
+      portrait_choice == "A picture of me" ~ {
+        p <- file.path(img_dir, paste0(hashed_id, "_portrait.", tools::file_ext(portrait)))
+        if_else(file.exists(p), p, paste0("https://api.dicebear.com/9.x/shapes/svg?seed=", hashed_id))
+      },
+      portrait_choice == "An avatar (automatically generated)" ~
+        paste0("https://api.dicebear.com/9.x/shapes/svg?seed=", hashed_id),
+      TRUE ~ NA_character_
+    )
+  )
 
-cards <- portraits |>
+cards <- all_profiles |>
   mutate(
-    card = paste0(
-      '<div style="text-align:center;display:inline-block;width:130px;margin:8px;vertical-align:top;">',
-      '<img src="', img_path, '" style="width:110px;height:110px;object-fit:cover;border-radius:50%;"/>',
-      '<div style="font-size:0.8em;margin-top:4px;">', first_name, '<br/><strong>', last_name, '</strong></div>',
-      '</div>'
+    card = if_else(
+      is.na(img_src),
+      paste0(
+        '<div style="text-align:center;display:inline-block;width:130px;margin:8px;vertical-align:top;">',
+        '<div style="width:110px;height:110px;"></div>',
+        '<div style="font-size:0.8em;margin-top:4px;">', full_name, '</div>',
+        '</div>'
+      ),
+      paste0(
+        '<div style="text-align:center;display:inline-block;width:130px;margin:8px;vertical-align:top;">',
+        '<img src="', img_src, '" style="width:110px;height:110px;object-fit:cover;border-radius:50%;"/>',
+        '<div style="font-size:0.8em;margin-top:4px;">', full_name, '</div>',
+        '</div>'
+      )
     )
   )
 
@@ -494,7 +482,7 @@ htmltools::browsable(htmltools::HTML(paste0(
 )))
 ```
 
-## Portfolio
+## Fiches chercheurs
 
 ```{r}
 #| label: portfolio-setup
@@ -598,7 +586,7 @@ cards_html <- purrr::map_chr(prof |> arrange(last_name, first_name) |> pull(user
 
   # Identit\u00e9
   middle    <- if (!is.na(p$middle_name) && p$middle_name != "") paste0(" ", p$middle_name) else ""
-  full_name <- paste0(p$first_name, middle, " ", p$last_name)
+  full_name <- paste0(str_to_title(p$first_name), middle, " ", str_to_title(p$last_name))
   institution <- if (!is.na(p$institution_other) && p$institution_other != "") p$institution_other else p$institution
 
   orcid_val  <- str_trim(coalesce(p$orcid, ""))
@@ -724,4 +712,54 @@ cards_html <- purrr::map_chr(prof |> arrange(last_name, first_name) |> pull(user
 })
 
 htmltools::browsable(htmltools::HTML(paste(cards_html, collapse = "\n")))
+```
+
+## Intégration des projets dans ceux de l’Université
+
+```{r}
+#| label: ecr-eunicoast
+#| fig-width: 10
+#| fig-height: 5
+labels_ecr <- c(
+  "ecr_integration___1" = "Enjeux maritimes et portuaires",
+  "ecr_integration___2" = "La ville de demain : architecture, urbanisme,\nconstruction durable et design",
+  "ecr_integration___3" = "Transitions, risques et aléas"
+)
+
+labels_eunicoast <- c(
+  "eunicoast_integration___1" = "Identités, savoirs locaux et\npatrimoine culturel",
+  "eunicoast_integration___2" = "Économie circulaire bleue, logistique\nportuaire et tourisme bleu durable",
+  "eunicoast_integration___3" = "Gouvernance, planification,\ngestion et surveillance",
+  "eunicoast_integration___4" = "Santé, biodiversité et solutions\nfondées sur la nature",
+  "eunicoast_integration___5" = "Solutions ingéniées et numériques\npour les infrastructures côtières"
+)
+
+completed <- data_raw |> filter(researcher_profile_complete == 2)
+n_proj <- nrow(completed)
+
+plot_integration <- function(data, labels, titre, fill_color) {
+  cols <- names(labels)
+  data |>
+    select(all_of(cols)) |>
+    summarise(across(everything(), ~ sum(as.integer(.x) == 1, na.rm = TRUE))) |>
+    pivot_longer(everything(), names_to = "variable", values_to = "n") |>
+    mutate(
+      label = labels[variable],
+      label = factor(label, levels = rev(labels)),
+      pct   = n / n_proj
+    ) |>
+    ggplot(aes(x = label, y = n)) +
+    geom_col(fill = fill_color, alpha = 0.85, width = 0.6) +
+    geom_text(aes(label = paste0(n, " (", round(pct * 100), "%)")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    scale_y_continuous(limits = c(0, n_proj + 2), breaks = scales::pretty_breaks()) +
+    labs(title = titre, x = NULL, y = paste0("Nombre de projets (N=", n_proj, ")")) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold"))
+}
+
+p_ecr      <- plot_integration(completed, labels_ecr,      "Intégration ECR",      "#fd7e14")
+p_eunicoast <- plot_integration(completed, labels_eunicoast, "Intégration EUNICoast", "#e83e8c")
+
+gridExtra::grid.arrange(p_ecr, p_eunicoast, ncol = 2)
 ```

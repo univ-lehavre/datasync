@@ -26,3 +26,8 @@ nlp_fields:
 file_fields_nlp:
   - instrument: publications
     field: publications
+
+file_fields_nlp_merged:
+  - instrument: project_proposal
+    fields: [paper1, paper2, paper3]
+    name: papers

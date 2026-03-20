@@ -208,7 +208,7 @@ run_lda <- function(tokens_df, lang_code, n_docs) {
     return(NULL)
   }
 
-  k_max <- min(5L, floor(n_docs / 2L))
+  k_max <- min(20L, floor(n_docs / 2L))
   if (k_max < 2L) {
     return(NULL)
   }

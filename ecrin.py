@@ -813,10 +813,21 @@ def up() -> None:
                 or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files_ok)
                 for e in nlp_entries_ok
             )
+            file_nlp_merged_ok = [
+                e for e in (cfg.get("file_fields_nlp_merged") or [])
+                if e["instrument"] == inst["name"]
+            ]
             file_extract_pending = any(
                 not (inst_data_dir_ok / f"extracted-{e['field']}").exists()
                 or not any(k.startswith(f"extracted-{e['field']}/") for k in inst_files_ok)
                 for e in file_nlp_entries_ok
+            ) or any(
+                any(
+                    not (inst_data_dir_ok / f"extracted-{field}").exists()
+                    or not any(k.startswith(f"extracted-{field}/") for k in inst_files_ok)
+                    for field in e["fields"]
+                )
+                for e in file_nlp_merged_ok
             )
             if not nlp_pending and not file_extract_pending:
                 console.print(f"  [green]✓[/green] {inst['label']:<35} en cache")
@@ -1072,6 +1083,132 @@ def up() -> None:
                 }
                 redcap_state[key]["files"].update(extracted_hashes)
                 save_redcap_state(name, redcap_state)
+
+        file_nlp_merged_entries = [
+            e for e in (cfg.get("file_fields_nlp_merged") or [])
+            if e["instrument"] == inst["name"]
+        ]
+        if file_nlp_merged_entries and files_dir.exists():
+            for entry in file_nlp_merged_entries:
+                merged_name = entry["name"]
+                fields = entry["fields"]
+                all_merged_refs: list[dict] = []
+
+                for field in fields:
+                    extracted_dir = inst_data_dir / f"extracted-{field}"
+                    extracted_dir.mkdir(parents=True, exist_ok=True)
+                    extract_task = {
+                        "files_dir": str(files_dir),
+                        "output_dir": str(extracted_dir),
+                        "field": field,
+                    }
+                    extract_result = run_r_task("extract_files_text.R", extract_task)
+                    n_ext = extract_result.get("n_extracted", 0)
+                    n_skip = extract_result.get("n_skipped", 0)
+
+                    texts_dir = extracted_dir / "texts"
+                    field_refs: list[dict] = []
+                    if texts_dir.exists():
+                        for txt_file in sorted(texts_dir.glob("*.txt")):
+                            hashed_id = txt_file.stem
+                            biblio_result = run_python_task("extract_biblio.py", {
+                                "text_path": str(txt_file),
+                                "hashed_id": hashed_id,
+                            })
+                            refs = biblio_result.get("refs") or []
+                            field_refs.extend(refs)
+
+                    if field_refs:
+                        biblio_csv = extracted_dir / "biblio_refs.csv"
+                        fieldnames = ["ref_id", "hashed_id", "raw", "title", "author", "year", "journal", "doi", "reportnum"]
+                        with biblio_csv.open("w", newline="", encoding="utf-8") as fh:
+                            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+                            writer.writeheader()
+                            for i, ref in enumerate(field_refs):
+                                writer.writerow({"ref_id": i, **ref})
+
+                        authors_csv = extracted_dir / "biblio_authors.csv"
+                        with authors_csv.open("w", newline="", encoding="utf-8") as fh:
+                            writer = csv.DictWriter(fh, fieldnames=["ref_id", "hashed_id", "author"])
+                            writer.writeheader()
+                            for ref_idx, ref in enumerate(field_refs):
+                                raw_author = (ref.get("author") or "").strip()
+                                if not raw_author:
+                                    continue
+                                def _split_one_m(s: str) -> list[str]:
+                                    s = s.strip().rstrip(",").strip()
+                                    comma_parts = [p.strip() for p in s.split(",") if p.strip()]
+                                    if len(comma_parts) <= 1 or not all(len(p.split()) <= 5 for p in comma_parts):
+                                        return [s]
+                                    apa_like = (not re.match(r"^[A-Z]\.", comma_parts[0])
+                                                and len(comma_parts) >= 2
+                                                and re.match(r"^[A-Z][\.\-]", comma_parts[1]))
+                                    if apa_like:
+                                        names, ci = [], 0
+                                        while ci < len(comma_parts):
+                                            name = comma_parts[ci]
+                                            if ci + 1 < len(comma_parts) and re.match(r"^[A-Z][\.\-]", comma_parts[ci + 1]):
+                                                name = f"{name}, {comma_parts[ci + 1]}"
+                                                ci += 2
+                                            else:
+                                                ci += 1
+                                            names.append(name)
+                                        return names if len(names) > 1 else [s]
+                                    return comma_parts
+                                parts = []
+                                for and_part in re.split(r"\s+and\s+", raw_author, flags=re.IGNORECASE):
+                                    parts.extend(_split_one_m(and_part))
+                                for author in parts:
+                                    author = author.strip().rstrip(".")
+                                    if author:
+                                        writer.writerow({"ref_id": ref_idx, "hashed_id": ref.get("hashed_id"), "author": author})
+
+                    console.print(
+                        f"    [green]✓[/green] Extraction {field} ({merged_name}) — "
+                        f"{n_ext} fichier(s), {len(field_refs)} réf(s) biblio"
+                        + (f", {n_skip} ignoré(s)" if n_skip else "")
+                    )
+                    all_merged_refs.extend(field_refs)
+
+                    extracted_hashes = {
+                        f"extracted-{field}/{f.relative_to(extracted_dir)}": sha256_file(f)
+                        for f in extracted_dir.rglob("*")
+                        if f.is_file()
+                    }
+                    redcap_state[key]["files"].update(extracted_hashes)
+                    save_redcap_state(name, redcap_state)
+
+                if all_merged_refs:
+                    merged_dir = inst_data_dir / f"nlp-{merged_name}"
+                    merged_dir.mkdir(parents=True, exist_ok=True)
+                    merged_biblio_csv = merged_dir / "biblio_refs.csv"
+                    fieldnames = ["ref_id", "hashed_id", "raw", "title", "author", "year", "journal", "doi", "reportnum"]
+                    with merged_biblio_csv.open("w", newline="", encoding="utf-8") as fh:
+                        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+                        writer.writeheader()
+                        for i, ref in enumerate(all_merged_refs):
+                            writer.writerow({"ref_id": i, **ref})
+                    nlp_task = {
+                        "csv_path": str(merged_biblio_csv),
+                        "field": "title",
+                        "id_field": "ref_id",
+                        "output_dir": str(merged_dir),
+                    }
+                    nlp_result = run_r_task("nlp_text.R", nlp_task)
+                    langues = nlp_result.get("langues", {})
+                    lda_k = nlp_result.get("lda_k", {})
+                    lang_summary = ", ".join(
+                        f"{lang}:{n}(k={lda_k[lang]})" if lang in lda_k else f"{lang}:{n}"
+                        for lang, n in langues.items()
+                    )
+                    console.print(f"    [green]✓[/green] NLP {merged_name} (fusionné) — {lang_summary or 'vide'}")
+                    nlp_hashes = {
+                        f"nlp-{merged_name}/{f.name}": sha256_file(f)
+                        for f in merged_dir.iterdir()
+                        if f.is_file()
+                    }
+                    redcap_state[key]["files"].update(nlp_hashes)
+                    save_redcap_state(name, redcap_state)
 
         log_actions.append({"instrument": inst["name"], "status": action})
 

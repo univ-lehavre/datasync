@@ -71,7 +71,7 @@ n_participants <- nrow(data_raw)
 ```
 
 
-Sur 45 personnes contactées, `r n_participants` participants ont souhaité participer à notre première vague d’enquêtes.
+Sur 45 personnes contactées, `r n_participants` chercheurs ont souhaité participer à notre première vague d’enquêtes.
 
 ```{r}
 #| label: participation-instruments
@@ -99,7 +99,7 @@ tibble(
 
 ### Conclusion
 
-La participation est très élevée, sauf pour l’instrument lié à la proposition de projet. Ce dernier instrument est différent des autres et demande beaucoup d’investissement à l’enquêté.
+La participation est très élevée — 100% des volontaires ont répondu — sauf pour l’instrument lié à la proposition de projet. Ce dernier instrument est différent des autres et demande beaucoup d’investissement à l’enquêté.
 
 Nous sommes en présence d’une communauté active, ce qui est de bonne augure pour la suite du projet.
 
@@ -492,18 +492,27 @@ Les questions de recherche ont été analysées par modélisation thématique (L
 nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
                      "research_questions", "nlp-research_questions")
 
-lda_topics  <- read_csv(file.path(nlp_dir, "lda_topics.csv"),           show_col_types = FALSE)
-lda_indiv   <- read_csv(file.path(nlp_dir, "lda_individus_enrichi.csv"), show_col_types = FALSE)
-tfidf       <- read_csv(file.path(nlp_dir, "tfidf.csv"),                 show_col_types = FALSE)
+lda_topics  <- read_csv(file.path(nlp_dir, "lda_topics.csv"), show_col_types = FALSE)
+tfidf       <- read_csv(file.path(nlp_dir, "tfidf.csv"),      show_col_types = FALSE)
+
+enrichi_path <- file.path(nlp_dir, "lda_individus_enrichi.csv")
+if (file.exists(enrichi_path)) {
+  lda_indiv <- read_csv(enrichi_path, show_col_types = FALSE) |>
+    mutate(
+      full_name      = paste0(str_to_title(first_name), " ", str_to_title(last_name)),
+      topic_dominant = as.character(topic_dominant)
+    )
+} else {
+  lda_indiv <- read_csv(file.path(nlp_dir, "lda_individus.csv"), show_col_types = FALSE) |>
+    mutate(
+      full_name      = as.character(userid),
+      topic_dominant = as.character(topic_dominant)
+    )
+}
 
 topic_colors <- c("1" = "#e41a1c", "2" = "#377eb8", "3" = "#4daf4a",
                   "4" = "#ff7f00", "5" = "#984ea3")
-
-lda_indiv <- lda_indiv |>
-  mutate(
-    full_name     = paste0(str_to_title(first_name), " ", str_to_title(last_name)),
-    topic_dominant = as.character(topic_dominant)
-  )
+has_lda <- nrow(lda_topics) > 0
 ```
 
 ### Top termes par topic
@@ -512,23 +521,25 @@ lda_indiv <- lda_indiv |>
 #| label: nlp-top-termes
 #| fig-width: 10
 #| fig-height: 7
-lda_topics |>
-  filter(langue == "en") |>
-  mutate(topic = paste("Topic", topic)) |>
-  group_by(topic) |>
-  slice_max(beta, n = 10) |>
-  ungroup() |>
-  mutate(term = paste0(term, "__", topic),
-         term = fct_reorder(term, beta)) |>
-  ggplot(aes(x = term, y = beta, fill = topic)) +
-  geom_col(show.legend = FALSE, alpha = 0.85) +
-  facet_wrap(~ topic, scales = "free_y", ncol = 5) +
-  coord_flip() +
-  scale_x_discrete(labels = function(x) sub("__.*$", "", x)) +
-  scale_fill_manual(values = setNames(unname(topic_colors), paste("Topic", 1:5))) +
-  labs(x = NULL, y = "Probabilité (β)", title = "Top 10 termes par topic (LDA)") +
-  theme_minimal() +
-  theme(strip.text = element_text(face = "bold"))
+if (has_lda) {
+  lda_topics |>
+    filter(langue == "en") |>
+    mutate(topic = paste("Topic", topic)) |>
+    group_by(topic) |>
+    slice_max(beta, n = 10) |>
+    ungroup() |>
+    mutate(term = paste0(term, "__", topic),
+           term = fct_reorder(term, beta)) |>
+    ggplot(aes(x = term, y = beta, fill = topic)) +
+    geom_col(show.legend = FALSE, alpha = 0.85) +
+    facet_wrap(~ topic, scales = "free_y", ncol = 5) +
+    coord_flip() +
+    scale_x_discrete(labels = function(x) sub("__.*$", "", x)) +
+    scale_fill_manual(values = setNames(unname(topic_colors), paste("Topic", 1:5))) +
+    labs(x = NULL, y = "Probabilité (β)", title = "Top 10 termes par topic (LDA)") +
+    theme_minimal() +
+    theme(strip.text = element_text(face = "bold"))
+}
 ```
 
 ### Nuages de mots par topic
@@ -538,19 +549,21 @@ lda_topics |>
 #| fig-width: 10
 #| fig-height: 8
 #| warning: false
-par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
-for (t in 1:5) {
-  df <- lda_topics |>
-    filter(langue == "en", topic == t) |>
-    select(word = term, freq = beta) |>
-    arrange(desc(freq))
-  wordcloud::wordcloud(
-    words = df$word, freq = df$freq,
-    max.words = 10, scale = c(3, 0.8),
-    colors = colorRampPalette(c("grey80", topic_colors[[as.character(t)]]))(10),
-    main = paste("Topic", t)
-  )
-  title(paste("Topic", t), line = 0.5)
+if (has_lda) {
+  par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+  for (t in 1:5) {
+    df <- lda_topics |>
+      filter(langue == "en", topic == t) |>
+      select(word = term, freq = beta) |>
+      arrange(desc(freq))
+    wordcloud::wordcloud(
+      words = df$word, freq = df$freq,
+      max.words = 10, scale = c(3, 0.8),
+      colors = colorRampPalette(c("grey80", topic_colors[[as.character(t)]]))(10),
+      main = paste("Topic", t)
+    )
+    title(paste("Topic", t), line = 0.5)
+  }
 }
 ```
 
@@ -560,23 +573,25 @@ for (t in 1:5) {
 #| label: nlp-heatmap
 #| fig-width: 10
 #| fig-height: 7
-lda_indiv |>
-  select(full_name, topic_dominant, gamma_1:gamma_5) |>
-  pivot_longer(gamma_1:gamma_5, names_to = "topic", values_to = "gamma") |>
-  mutate(
-    topic     = paste("Topic", str_extract(topic, "\\d")),
-    full_name = factor(full_name, levels = lda_indiv |>
-                         arrange(topic_dominant, full_name) |> pull(full_name))
-  ) |>
-  ggplot(aes(x = topic, y = full_name, fill = gamma)) +
-  geom_tile(color = "white", linewidth = 0.4) +
-  geom_text(aes(label = if_else(gamma > 0.15, round(gamma, 2), NA_real_)),
-            size = 3, color = "white") +
-  scale_fill_gradient(low = "#f7f7f7", high = "#2166ac", name = "γ") +
-  labs(x = NULL, y = NULL, title = "Appartenance thématique par chercheur (γ)") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(face = "bold"),
-        panel.grid  = element_blank())
+if (has_lda) {
+  lda_indiv |>
+    select(full_name, topic_dominant, gamma_1:gamma_5) |>
+    pivot_longer(gamma_1:gamma_5, names_to = "topic", values_to = "gamma") |>
+    mutate(
+      topic     = paste("Topic", str_extract(topic, "\\d")),
+      full_name = factor(full_name, levels = lda_indiv |>
+                           arrange(topic_dominant, full_name) |> pull(full_name))
+    ) |>
+    ggplot(aes(x = topic, y = full_name, fill = gamma)) +
+    geom_tile(color = "white", linewidth = 0.4) +
+    geom_text(aes(label = if_else(gamma > 0.15, round(gamma, 2), NA_real_)),
+              size = 3, color = "white") +
+    scale_fill_gradient(low = "#f7f7f7", high = "#2166ac", name = "γ") +
+    labs(x = NULL, y = NULL, title = "Appartenance thématique par chercheur (γ)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(face = "bold"),
+          panel.grid  = element_blank())
+}
 ```
 
 ### TF-IDF — termes discriminants
@@ -585,60 +600,318 @@ lda_indiv |>
 #| label: nlp-tfidf
 #| fig-width: 9
 #| fig-height: 7
-tfidf |>
-  filter(langue == "en") |>
-  slice_max(tf_idf_moyen, n = 30) |>
-  mutate(token = fct_reorder(token, tf_idf_moyen)) |>
-  ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
-  geom_point(alpha = 0.85) +
-  coord_flip() +
-  scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb docs") +
-  scale_size_continuous(range = c(3, 10), name = "Nb docs") +
-  guides(size = "none") +
-  labs(x = NULL, y = "TF-IDF moyen", title = "Top 30 termes discriminants (TF-IDF)") +
-  theme_minimal()
+if (nrow(tfidf) > 0) {
+  tfidf |>
+    filter(langue == "en") |>
+    slice_max(tf_idf_moyen, n = 30) |>
+    mutate(token = fct_reorder(token, tf_idf_moyen)) |>
+    ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
+    geom_point(alpha = 0.85) +
+    coord_flip() +
+    scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb docs") +
+    scale_size_continuous(range = c(3, 10), name = "Nb docs") +
+    guides(size = "none") +
+    labs(x = NULL, y = "TF-IDF moyen", title = "Top 30 termes discriminants (TF-IDF)") +
+    theme_minimal()
+}
 ```
 
 ### Réseau chercheurs — topics
 
 ```{r}
 #| label: nlp-network
-library(visNetwork)
+if (has_lda) {
+  library(visNetwork)
 
-nodes_topics <- tibble(
+  nodes_topics <- tibble(
+    id    = paste0("t", 1:5),
+    label = paste("Topic", 1:5),
+    group = "topic",
+    color = unname(topic_colors),
+    shape = "ellipse",
+    size  = 30,
+    font.size = 16
+  )
+
+  nodes_chercheurs <- lda_indiv |>
+    mutate(id = paste0("c", row_number())) |>
+    select(id, label = full_name, topic_dominant) |>
+    mutate(
+      group = "chercheur",
+      color = topic_colors[topic_dominant],
+      shape = "dot",
+      size  = 18,
+      font.size = 13
+    )
+
+  nodes <- bind_rows(nodes_topics, nodes_chercheurs |> select(-topic_dominant))
+
+  gamma_long <- lda_indiv |>
+    mutate(from = paste0("c", row_number())) |>
+    select(from, gamma_1:gamma_5) |>
+    pivot_longer(-from, names_to = "topic", values_to = "gamma") |>
+    mutate(to = paste0("t", str_extract(topic, "\\d"))) |>
+    filter(gamma > 0.05) |>
+    mutate(value = round(gamma * 10, 1), title = paste0("γ = ", round(gamma, 2)))
+
+  edges <- gamma_long |> select(from, to, value, title)
+
+  visNetwork(nodes, edges, height = "550px", width = "100%") |>
+    visPhysics(
+      solver = "forceAtlas2Based",
+      forceAtlas2Based = list(gravitationalConstant = -80, springLength = 120)
+    ) |>
+    visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE)) |>
+    visLegend(addNodes = list(
+      list(label = "Topic",     shape = "ellipse", color = "#aaa"),
+      list(label = "Chercheur", shape = "dot",     color = "#aaa")
+    ), useGroups = FALSE) |>
+    visInteraction(navigationButtons = TRUE)
+}
+```
+
+## Publications
+
+Les noms de co-auteurs sont extraits automatiquement par NLP depuis les listes de publications fournies au format PDF. La qualité de l'extraction dépend de la mise en forme de chaque document : les formats hétérogènes (abréviation des prénoms, ordre nom/prénom variable, caractères spéciaux, artefacts de PDF) peuvent introduire des doublons ou des noms mal parsés. Le graphe ci-dessous est donc indicatif et non exhaustif.
+
+### Analyse des titres extraits
+
+```{r}
+#| label: publi-nlp-setup
+#| include: false
+pub_nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                         "publications", "nlp-publications")
+
+pub_source  <- read_csv(file.path(pub_nlp_dir, "00_source.csv"),    show_col_types = FALSE)
+pub_topics  <- read_csv(file.path(pub_nlp_dir, "lda_topics.csv"),   show_col_types = FALSE)
+pub_indivs  <- read_csv(file.path(pub_nlp_dir, "lda_individus.csv"),show_col_types = FALSE)
+pub_tfidf   <- read_csv(file.path(pub_nlp_dir, "tfidf.csv"),        show_col_types = FALSE)
+bib_refs    <- read_csv(file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                                  "publications", "extracted-publications", "biblio_refs.csv"),
+                        show_col_types = FALSE)
+
+pub_topic_colors <- c("1" = "#e41a1c", "2" = "#377eb8", "3" = "#4daf4a",
+                      "4" = "#ff7f00", "5" = "#984ea3")
+
+prof_ids <- read_csv(file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                               "researcher_profile", "identifiables.csv"),
+                     show_col_types = FALSE) |>
+  select(hashed_id, last_name, first_name) |>
+  mutate(full_name = paste0(str_to_title(first_name), " ", str_to_title(last_name)))
+```
+
+#### Distribution des langues
+
+```{r}
+#| label: publi-langues
+#| fig-width: 8
+#| fig-height: 4
+lang_labels <- c(
+  en = "Anglais", fr = "Français", unknown = "Indéterminée",
+  ja = "Japonais", ca = "Catalan", cy = "Gallois",
+  de = "Allemand", la = "Latin", bs = "Bosnien",
+  mt = "Maltais", ny = "Chichewa", fy = "Frison"
+)
+
+pub_source |>
+  mutate(langue_label = coalesce(lang_labels[langue], langue)) |>
+  count(langue_label) |>
+  mutate(
+    langue_label = fct_reorder(langue_label, n),
+    pct = n / sum(n),
+    label = paste0(n, " (", round(pct * 100), "%)")
+  ) |>
+  ggplot(aes(x = langue_label, y = n, fill = langue_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  geom_text(aes(label = label), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 145)) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa"
+  ), na.value = "#cccccc") +
+  labs(x = NULL, y = "Nombre de titres",
+       title = "Distribution des langues détectées",
+       subtitle = paste0("N = ", nrow(pub_source), " titres extraits")) +
+  theme_minimal()
+```
+
+#### Distribution de la longueur des titres
+
+```{r}
+#| label: publi-longueur
+#| fig-width: 9
+#| fig-height: 4
+pub_source |>
+  mutate(langue_grp = case_when(
+    langue == "en"      ~ "Anglais",
+    langue == "fr"      ~ "Français",
+    langue == "unknown" ~ "Indéterminée",
+    TRUE                ~ "Autre"
+  )) |>
+  ggplot(aes(x = n_tokens, fill = langue_grp)) +
+  geom_histogram(binwidth = 2, color = "white", alpha = 0.85) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa", "Autre" = "#74c476"
+  )) +
+  geom_vline(xintercept = 3, linetype = "dashed", color = "#888", linewidth = 0.6) +
+  annotate("text", x = 3.5, y = Inf, label = "Seuil artefact", vjust = 1.5,
+           hjust = 0, size = 3, color = "#888") +
+  labs(x = "Nombre de mots", y = "Nombre de titres", fill = "Langue",
+       title = "Longueur des titres extraits",
+       subtitle = "Les titres très courts (≤ 3 mots) sont probablement des artefacts d'extraction") +
+  theme_minimal()
+```
+
+#### Top termes par topic
+
+```{r}
+#| label: publi-top-termes
+#| fig-width: 12
+#| fig-height: 8
+pub_topics |>
+  filter(langue %in% c("en", "fr")) |>
+  mutate(
+    langue_label = if_else(langue == "en", "Anglais", "Français"),
+    topic_label  = paste("Topic", topic)
+  ) |>
+  group_by(langue_label, topic_label) |>
+  slice_max(beta, n = 8) |>
+  ungroup() |>
+  mutate(term = paste0(term, "__", langue_label, "_", topic_label),
+         term = fct_reorder(term, beta)) |>
+  ggplot(aes(x = term, y = beta, fill = topic_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  facet_wrap(langue_label ~ topic_label, scales = "free_y", ncol = 5) +
+  coord_flip() +
+  scale_x_discrete(labels = function(x) sub("__.*$", "", x)) +
+  scale_fill_manual(values = setNames(unname(pub_topic_colors), paste("Topic", 1:5))) +
+  labs(x = NULL, y = "β", title = "Top 8 termes par topic — Titres de publications (LDA)") +
+  theme_minimal(base_size = 10) +
+  theme(strip.text = element_text(face = "bold"))
+```
+
+#### TF-IDF — termes discriminants
+
+```{r}
+#| label: publi-tfidf
+#| fig-width: 10
+#| fig-height: 6
+pub_tfidf |>
+  filter(langue %in% c("en", "fr")) |>
+  mutate(langue_label = if_else(langue == "en", "Anglais", "Français")) |>
+  group_by(langue_label) |>
+  slice_max(tf_idf_moyen, n = 20) |>
+  ungroup() |>
+  mutate(token = fct_reorder(token, tf_idf_moyen)) |>
+  ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
+  geom_point(alpha = 0.85) +
+  facet_wrap(~ langue_label, scales = "free_y") +
+  coord_flip() +
+  scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb docs") +
+  scale_size_continuous(range = c(3, 10), guide = "none") +
+  labs(x = NULL, y = "TF-IDF moyen",
+       title = "Top 20 termes discriminants des titres (TF-IDF)") +
+  theme_minimal()
+```
+
+#### Heatmap chercheurs × topics
+
+```{r}
+#| label: publi-heatmap
+#| fig-width: 10
+#| fig-height: 6
+pub_indivs |>
+  left_join(bib_refs |> select(ref_id, hashed_id), by = c("userid" = "ref_id")) |>
+  filter(!is.na(hashed_id)) |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  mutate(topic_dominant = as.character(topic_dominant)) |>
+  select(full_name, topic_dominant, gamma_1:gamma_5) |>
+  group_by(full_name) |>
+  summarise(
+    topic_dominant = names(which.max(table(topic_dominant))),
+    across(gamma_1:gamma_5, mean),
+    .groups = "drop"
+  ) |>
+  pivot_longer(gamma_1:gamma_5, names_to = "topic", values_to = "gamma") |>
+  mutate(
+    topic     = paste("Topic", str_extract(topic, "\\d")),
+    full_name = factor(full_name, levels = {
+      pub_indivs |>
+        left_join(bib_refs |> select(ref_id, hashed_id), by = c("userid" = "ref_id")) |>
+        left_join(prof_ids, by = "hashed_id") |>
+        filter(!is.na(full_name)) |>
+        mutate(topic_dominant = as.character(topic_dominant)) |>
+        group_by(full_name) |>
+        summarise(td = names(which.max(table(topic_dominant))), .groups = "drop") |>
+        arrange(td) |>
+        pull(full_name)
+    })
+  ) |>
+  ggplot(aes(x = topic, y = full_name, fill = gamma)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = if_else(gamma > 0.15, round(gamma, 2), NA_real_)),
+            size = 3, color = "white") +
+  scale_fill_gradient(low = "#f7f7f7", high = "#8e0152", name = "γ moyen") +
+  labs(x = NULL, y = NULL,
+       title = "Appartenance thématique des chercheurs — Publications (γ moyen)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(face = "bold"), panel.grid = element_blank())
+```
+
+#### Réseau thématique publications
+
+```{r}
+#| label: publi-network
+library(visNetwork)
+pub_indivs_ecrin <- pub_indivs |>
+  left_join(bib_refs |> select(ref_id, hashed_id), by = c("userid" = "ref_id")) |>
+  filter(!is.na(hashed_id)) |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  mutate(topic_dominant = as.character(topic_dominant))
+
+nodes_topics_pub <- tibble(
   id    = paste0("t", 1:5),
   label = paste("Topic", 1:5),
   group = "topic",
-  color = unname(topic_colors),
+  color = unname(pub_topic_colors),
   shape = "ellipse",
   size  = 30,
   font.size = 16
 )
 
-nodes_chercheurs <- lda_indiv |>
-  mutate(id = paste0("c", row_number())) |>
-  select(id, label = full_name, topic_dominant) |>
+nodes_cherch_pub <- pub_indivs_ecrin |>
+  select(full_name, topic_dominant) |>
+  distinct(full_name, .keep_all = TRUE) |>
   mutate(
-    group = "chercheur",
-    color = topic_colors[topic_dominant],
-    shape = "dot",
-    size  = 18,
+    id        = full_name,
+    label     = full_name,
+    group     = "chercheur",
+    color     = pub_topic_colors[topic_dominant],
+    shape     = "dot",
+    size      = 18,
     font.size = 13
   )
 
-nodes <- bind_rows(nodes_topics, nodes_chercheurs |> select(-topic_dominant))
+nodes_pub <- bind_rows(
+  nodes_topics_pub,
+  nodes_cherch_pub |> select(id, label, group, color, shape, size, font.size)
+)
 
-gamma_long <- lda_indiv |>
-  mutate(from = paste0("c", row_number())) |>
-  select(from, gamma_1:gamma_5) |>
-  pivot_longer(-from, names_to = "topic", values_to = "gamma") |>
+gamma_long_pub <- pub_indivs_ecrin |>
+  select(full_name, gamma_1:gamma_5) |>
+  group_by(full_name) |>
+  summarise(across(gamma_1:gamma_5, mean), .groups = "drop") |>
+  pivot_longer(-full_name, names_to = "topic", values_to = "gamma") |>
   mutate(to = paste0("t", str_extract(topic, "\\d"))) |>
   filter(gamma > 0.05) |>
-  mutate(value = round(gamma * 10, 1), title = paste0("γ = ", round(gamma, 2)))
+  transmute(from = full_name, to, value = round(gamma * 10, 1),
+            title = paste0("γ = ", round(gamma, 2)))
 
-edges <- gamma_long |> select(from, to, value, title)
-
-visNetwork(nodes, edges, height = "550px", width = "100%") |>
+visNetwork(nodes_pub, gamma_long_pub, height = "550px", width = "100%") |>
   visPhysics(
     solver = "forceAtlas2Based",
     forceAtlas2Based = list(gravitationalConstant = -80, springLength = 120)
@@ -651,11 +924,458 @@ visNetwork(nodes, edges, height = "550px", width = "100%") |>
   visInteraction(navigationButtons = TRUE)
 ```
 
-## Publications
+### Réseau de co-auteurs
 
+```{r}
+#| label: coauteurs-network
+library(visNetwork)
 
+pub_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                     "publications", "extracted-publications")
+
+bib_authors <- read_csv(file.path(pub_dir, "biblio_authors.csv"), show_col_types = FALSE)
+
+# Pour chaque référence : hashed_id ECRIN + liste co-auteurs
+refs_authors <- bib_authors |>
+  group_by(ref_id, hashed_id) |>
+  summarise(authors = list(author), .groups = "drop")
+
+# Arêtes ECRIN → co-auteur, pondérées par nb d'articles communs
+edges_raw <- refs_authors |>
+  unnest(authors) |>
+  rename(coauthor = authors) |>
+  left_join(prof_ids |> select(hashed_id, ecrin_name = full_name), by = "hashed_id") |>
+  filter(!is.na(ecrin_name)) |>
+  # exclure l'auteur ECRIN lui-même si son nom apparaît dans la liste
+  filter(coauthor != ecrin_name) |>
+  count(ecrin_name, coauthor, name = "weight")
+
+# Nœuds ECRIN
+ecrin_names <- unique(edges_raw$ecrin_name)
+nodes_ecrin <- tibble(
+  id    = ecrin_names,
+  label = ecrin_names,
+  group = "ECRIN",
+  color = "#2166ac",
+  shape = "dot",
+  size  = 22,
+  font.size = 13,
+  font.bold = TRUE
+)
+
+# Nœuds co-auteurs (garder ceux avec >= 2 co-publications pour lisibilité)
+coauthor_weight <- edges_raw |>
+  group_by(coauthor) |>
+  summarise(total = sum(weight)) |>
+  filter(total >= 2)
+
+nodes_coauth <- coauthor_weight |>
+  transmute(
+    id    = coauthor,
+    label = coauthor,
+    group = "Co-auteur",
+    color = "#d6604d",
+    shape = "dot",
+    size  = pmin(6 + total * 2, 20),
+    font.size = 11,
+    font.bold = FALSE
+  )
+
+nodes <- bind_rows(nodes_ecrin, nodes_coauth)
+
+edges <- edges_raw |>
+  filter(coauthor %in% coauthor_weight$coauthor) |>
+  transmute(
+    from  = ecrin_name,
+    to    = coauthor,
+    value = weight,
+    title = paste0(weight, " article", if_else(weight > 1, "s", ""))
+  )
+
+visNetwork(nodes, edges, height = "600px", width = "100%") |>
+  visPhysics(
+    solver = "forceAtlas2Based",
+    forceAtlas2Based = list(gravitationalConstant = -60, springLength = 140, springConstant = 0.05)
+  ) |>
+  visOptions(
+    highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+    nodesIdSelection = list(enabled = TRUE, main = "Sélectionner un chercheur")
+  ) |>
+  visLegend(addNodes = list(
+    list(label = "Chercheur ECRIN", shape = "dot", color = "#2166ac", size = 15),
+    list(label = "Co-auteur (≥ 2 articles)", shape = "dot", color = "#d6604d", size = 10)
+  ), useGroups = FALSE) |>
+  visInteraction(navigationButtons = TRUE)
+```
 
 ## Proposition de projet
+
+### Topics, mots-clés, méthodes et régions
+
+```{r}
+#| label: proj-setup
+#| include: false
+proj_full <- read_csv(
+  file.path(project_dir, "..", ".ecrin", "admin", "downloads", "project_proposal", "identifiables.csv"),
+  show_col_types = FALSE
+)
+
+rq_enrichi_path <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                             "research_questions", "nlp-research_questions", "lda_individus_enrichi.csv")
+rq_lda <- if (file.exists(rq_enrichi_path)) {
+  read_csv(rq_enrichi_path, show_col_types = FALSE) |>
+    mutate(full_name = paste0(str_to_title(first_name), " ", str_to_title(last_name)),
+           topic_lda = paste("Topic LDA", topic_dominant))
+} else {
+  read_csv(
+    file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+              "research_questions", "nlp-research_questions", "lda_individus.csv"),
+    show_col_types = FALSE
+  ) |>
+    mutate(full_name = as.character(userid),
+           topic_lda = paste("Topic LDA", topic_dominant))
+}
+
+# Table longue : un chercheur × une valeur par type
+proj_long <- proj_full |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  left_join(rq_lda |> select(full_name, topic_lda), by = "full_name") |>
+  select(full_name, topic_lda, topic,
+         keyword1, keyword2, keyword3,
+         method1, method2, method3,
+         region1, region2, region3) |>
+  pivot_longer(keyword1:region3, names_to = "var", values_to = "value") |>
+  filter(!is.na(value) & value != "") |>
+  mutate(type = case_when(
+    startsWith(var, "keyword") ~ "Mot-clé",
+    startsWith(var, "method")  ~ "Méthode",
+    startsWith(var, "region")  ~ "Région"
+  ))
+```
+
+#### Heatmap topics × mots-clés
+
+```{r}
+#| label: proj-heatmap-kw
+#| fig-width: 11
+#| fig-height: 6
+proj_long |>
+  filter(type == "Mot-clé", !is.na(topic_lda)) |>
+  count(topic_lda, value) |>
+  group_by(topic_lda) |>
+  slice_max(n, n = 8) |>
+  ungroup() |>
+  mutate(value = fct_reorder(value, n)) |>
+  ggplot(aes(x = topic_lda, y = value, fill = n)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  geom_text(aes(label = n), size = 3.5, color = "white") +
+  scale_fill_gradient(low = "#c6dbef", high = "#08519c", name = "N") +
+  labs(x = NULL, y = NULL, title = "Mots-clés les plus fréquents par topic LDA") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, face = "bold"),
+        panel.grid = element_blank())
+```
+
+#### Diagramme de Sankey — topic → mot-clé → méthode → région
+
+```{r}
+#| label: proj-sankey
+library(networkD3)
+
+make_sankey_links <- function(data, from_col, to_col, min_n = 1) {
+  data |>
+    filter(!is.na(.data[[from_col]]) & !is.na(.data[[to_col]])) |>
+    count(.data[[from_col]], .data[[to_col]]) |>
+    filter(n >= min_n) |>
+    rename(source = 1, target = 2, value = n)
+}
+
+proj_sankey <- proj_full |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  left_join(rq_lda |> select(full_name, topic_lda), by = "full_name")
+
+links_tk  <- make_sankey_links(proj_sankey, "topic_lda", "keyword1")
+links_km  <- make_sankey_links(proj_sankey |>
+  pivot_longer(keyword1:keyword3, values_to = "kw", names_to = "kvar") |>
+  pivot_longer(method1:method3,   values_to = "meth", names_to = "mvar") |>
+  filter(!is.na(kw) & kw != "" & !is.na(meth) & meth != ""), "kw", "meth")
+links_mr  <- make_sankey_links(proj_sankey |>
+  pivot_longer(method1:method3, values_to = "meth", names_to = "mvar") |>
+  pivot_longer(region1:region3, values_to = "reg",  names_to = "rvar") |>
+  filter(!is.na(meth) & meth != "" & !is.na(reg) & reg != ""), "meth", "reg", min_n = 1)
+
+all_links <- bind_rows(links_tk, links_km, links_mr)
+all_nodes <- tibble(name = unique(c(all_links$source, all_links$target)))
+
+all_links <- all_links |>
+  mutate(
+    source = match(source, all_nodes$name) - 1L,
+    target = match(target, all_nodes$name) - 1L
+  )
+
+sankeyNetwork(
+  Links = as.data.frame(all_links),
+  Nodes = as.data.frame(all_nodes),
+  Source = "source", Target = "target", Value = "value",
+  NodeID = "name", fontSize = 11, nodeWidth = 20,
+  height = 600, width = "100%",
+  sinksRight = FALSE
+)
+```
+
+#### Bubble chart — topics × mots-clés
+
+```{r}
+#| label: proj-bubble
+#| fig-width: 11
+#| fig-height: 7
+proj_long |>
+  filter(type == "Mot-clé", !is.na(topic)) |>
+  count(topic, value) |>
+  group_by(topic) |>
+  slice_max(n, n = 5) |>
+  ungroup() |>
+  ggplot(aes(x = topic, y = value, size = n, color = topic)) +
+  geom_point(alpha = 0.75) +
+  scale_size_continuous(range = c(4, 14), name = "N chercheurs") +
+  scale_color_brewer(palette = "Set1", guide = "none") +
+  labs(x = "Thématique (topic déclaré)", y = "Mot-clé",
+       title = "Mots-clés par thématique déclarée") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+```
+
+#### Réseau de co-occurrence — mots-clés, méthodes, régions
+
+```{r}
+#| label: proj-cooccurrence
+cooc_data <- proj_full |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  left_join(rq_lda |> select(full_name, topic_lda), by = "full_name") |>
+  select(full_name, topic_lda, keyword1:keyword3, method1:method3, region1:region3) |>
+  pivot_longer(-c(full_name, topic_lda), names_to = "var", values_to = "value") |>
+  filter(!is.na(value) & value != "") |>
+  mutate(type = case_when(
+    startsWith(var, "keyword") ~ "kw",
+    startsWith(var, "method")  ~ "meth",
+    startsWith(var, "region")  ~ "reg"
+  ))
+
+cooc_edges <- cooc_data |>
+  inner_join(cooc_data, by = "full_name", relationship = "many-to-many") |>
+  filter(value.x < value.y) |>
+  count(value.x, value.y, type.x, type.y, name = "weight") |>
+  filter(weight >= 2)
+
+type_colors <- c("kw" = "#0d6efd", "meth" = "#6f42c1", "reg" = "#0dcaf0")
+
+all_vals <- unique(c(cooc_edges$value.x, cooc_edges$value.y))
+node_types <- cooc_data |>
+  distinct(value, type) |>
+  filter(value %in% all_vals)
+
+nodes_cooc <- tibble(id = all_vals) |>
+  left_join(node_types, by = c("id" = "value")) |>
+  mutate(
+    label     = id,
+    color     = type_colors[type],
+    shape     = "dot",
+    size      = 12,
+    font.size = 11,
+    group     = type
+  )
+
+edges_cooc <- cooc_edges |>
+  transmute(from = value.x, to = value.y, value = weight,
+            title = paste0(weight, " chercheur(s)"))
+
+visNetwork(nodes_cooc, edges_cooc, height = "600px", width = "100%") |>
+  visPhysics(solver = "forceAtlas2Based",
+             forceAtlas2Based = list(gravitationalConstant = -50, springLength = 100)) |>
+  visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE)) |>
+  visLegend(addNodes = list(
+    list(label = "Mot-clé",  shape = "dot", color = "#0d6efd", size = 12),
+    list(label = "Méthode",  shape = "dot", color = "#6f42c1", size = 12),
+    list(label = "Région",   shape = "dot", color = "#0dcaf0", size = 12)
+  ), useGroups = FALSE) |>
+  visInteraction(navigationButtons = TRUE)
+```
+
+#### Réseau tripartite — chercheurs, topics, mots-clés/méthodes/régions
+
+```{r}
+#| label: proj-tripartite
+topic_lda_colors <- setNames(
+  c("#e41a1c","#377eb8","#4daf4a","#ff7f00","#984ea3"),
+  paste("Topic LDA", 1:5)
+)
+
+nodes_cherch_tri <- rq_lda |>
+  filter(full_name %in% proj_full$hashed_id |
+           full_name %in% (proj_full |> left_join(prof_ids, by="hashed_id") |> pull(full_name))) |>
+  semi_join(proj_full |> left_join(prof_ids, by="hashed_id") |> filter(!is.na(full_name)),
+            by = "full_name") |>
+  distinct(full_name, topic_lda) |>
+  transmute(id = full_name, label = full_name, group = "chercheur",
+            color = topic_lda_colors[topic_lda], shape = "dot", size = 18, font.size = 12)
+
+nodes_topics_tri <- tibble(
+  id    = paste("Topic LDA", 1:5),
+  label = paste("Topic LDA", 1:5),
+  group = "topic",
+  color = unname(topic_lda_colors),
+  shape = "ellipse", size = 28, font.size = 14
+)
+
+val_nodes <- cooc_data |>
+  distinct(value, type) |>
+  transmute(id = value, label = value, group = type,
+            color = type_colors[type], shape = "dot", size = 10, font.size = 10)
+
+nodes_tri <- bind_rows(nodes_cherch_tri, nodes_topics_tri, val_nodes)
+
+edges_ct <- rq_lda |>
+  semi_join(nodes_cherch_tri, by = c("full_name" = "id")) |>
+  transmute(from = full_name, to = topic_lda, value = 3, title = topic_lda)
+
+edges_cv <- cooc_data |>
+  semi_join(nodes_cherch_tri, by = c("full_name" = "id")) |>
+  transmute(from = full_name, to = value, value = 1, title = type)
+
+edges_tri <- bind_rows(edges_ct, edges_cv)
+
+visNetwork(nodes_tri, edges_tri, height = "650px", width = "100%") |>
+  visPhysics(solver = "forceAtlas2Based",
+             forceAtlas2Based = list(gravitationalConstant = -70, springLength = 150)) |>
+  visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+             nodesIdSelection = list(enabled = TRUE, main = "Sélectionner")) |>
+  visLegend(addNodes = list(
+    list(label = "Chercheur", shape = "dot",     color = "#aaa",    size = 14),
+    list(label = "Topic LDA", shape = "ellipse", color = "#aaa",    size = 14),
+    list(label = "Mot-clé",   shape = "dot",     color = "#0d6efd", size = 10),
+    list(label = "Méthode",   shape = "dot",     color = "#6f42c1", size = 10),
+    list(label = "Région",    shape = "dot",     color = "#0dcaf0", size = 10)
+  ), useGroups = FALSE) |>
+  visInteraction(navigationButtons = TRUE)
+```
+
+#### Réseau sigmajs — chercheur / topic / keyword / méthode / région
+
+```{r}
+#| label: proj-sigma
+#| out-width: "100%"
+library(sigmajs)
+
+sigma_data <- proj_full |>
+  left_join(prof_ids, by = "hashed_id") |>
+  filter(!is.na(full_name)) |>
+  select(full_name, topic, keyword1:keyword3, method1:method3, region1:region3)
+
+type_pal <- c(
+  chercheur = "#2166ac",
+  topic     = "#d6604d",
+  keyword   = "#4dac26",
+  method    = "#7b2d8b",
+  region    = "#e08214"
+)
+
+nodes_sigma <- bind_rows(
+  sigma_data |> distinct(full_name) |>
+    transmute(id = full_name, label = full_name, node_type = "chercheur"),
+  sigma_data |> filter(!is.na(topic) & topic != "") |> distinct(topic) |>
+    transmute(id = topic, label = topic, node_type = "topic"),
+  sigma_data |> pivot_longer(keyword1:keyword3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |> distinct(v) |>
+    transmute(id = v, label = v, node_type = "keyword"),
+  sigma_data |> pivot_longer(method1:method3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |> distinct(v) |>
+    transmute(id = v, label = v, node_type = "method"),
+  sigma_data |> pivot_longer(region1:region3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |> distinct(v) |>
+    transmute(id = v, label = v, node_type = "region")
+) |>
+  distinct(id, .keep_all = TRUE) |>
+  mutate(
+    color = type_pal[node_type],
+    size  = case_when(
+      node_type == "chercheur" ~ 5,
+      node_type == "topic"     ~ 4,
+      TRUE                     ~ 2
+    ),
+    x = runif(n(), -1, 1),
+    y = runif(n(), -1, 1)
+  )
+
+edges_sigma <- bind_rows(
+  sigma_data |> filter(!is.na(topic) & topic != "") |>
+    transmute(id = paste0("ct_", row_number()), source = full_name, target = topic),
+  sigma_data |> pivot_longer(keyword1:keyword3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |>
+    transmute(id = paste0("ck_", row_number()), source = topic, target = v),
+  sigma_data |> pivot_longer(method1:method3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |>
+    transmute(id = paste0("cm_", row_number()), source = topic, target = v),
+  sigma_data |> pivot_longer(region1:region3, values_to = "v") |>
+    filter(!is.na(v) & v != "") |>
+    transmute(id = paste0("cr_", row_number()), source = topic, target = v)
+) |>
+  mutate(
+    source = as.character(source),
+    target = as.character(target)
+  ) |>
+  filter(source %in% nodes_sigma$id & target %in% nodes_sigma$id)
+
+w <- sigmajs(height = "600px", width = "100%") |>
+    sg_nodes(nodes_sigma, id, label, size, color, x, y) |>
+    sg_edges(edges_sigma, id, source, target) |>
+    sg_layout(layout = igraph::layout_with_fr) |>
+    sg_settings(
+      defaultEdgeColor    = "#cccccc",
+      edgeColor           = "default",
+      minNodeSize         = 2,
+      maxNodeSize         = 8,
+      labelThreshold      = 1,
+      drawEdges           = TRUE,
+      defaultLabelColor   = "#333333"
+    ) |>
+    sg_neighbors()
+
+# sigmajs 0.1.5 ignore le paramètre height — on force via CSS sur l'id du widget
+wid <- w$elementId %||% paste0("sigmajs-", sample.int(1e6, 1))
+w$elementId <- wid
+htmltools::tagList(
+  htmltools::tags$style(sprintf(
+    "#%s { height: 600px !important; width: 100%% !important; }
+     #%s canvas { height: 600px !important; width: 100%% !important; }",
+    wid, wid
+  )),
+  w,
+  htmltools::tags$script(sprintf(
+    "document.addEventListener('DOMContentLoaded', function() {
+       setTimeout(function() {
+         var el = document.getElementById('%s');
+         if (el) {
+           el.style.height = '600px';
+           el.style.width  = '100%%';
+           var canvases = el.querySelectorAll('canvas');
+           canvases.forEach(function(c) {
+             c.style.height = '600px';
+             c.height = 600;
+             c.style.width  = '100%%';
+           });
+           if (window.HTMLWidgets) {
+             HTMLWidgets.staticRender();
+           }
+         }
+       }, 500);
+     });",
+    wid
+  ))
+)
+```
 
 ### Intégration des projets dans ceux de l’Université
 

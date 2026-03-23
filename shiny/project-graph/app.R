@@ -75,6 +75,8 @@ if (file.exists(raw_path)) {
 prof_path <- file.path(dirname(data_dir), "researcher_profile", "identifiables.csv")
 rq_path <- file.path(dirname(data_dir), "research_questions", "identifiables.csv")
 pub_path <- file.path(dirname(data_dir), "publications", "identifiables.csv")
+pub_files <- file.path(dirname(data_dir), "publications", "files")
+addResourcePath("pub_files", pub_files)
 
 if (file.exists(prof_path)) {
   prof <- read_csv(prof_path, show_col_types = FALSE) |>
@@ -99,15 +101,8 @@ rq_data <- if (file.exists(rq_path)) {
   tibble(hashed_id = character(), research_questions = character())
 }
 
-pub_data <- if (file.exists(pub_path)) {
-  read_csv(pub_path, show_col_types = FALSE) |> select(hashed_id, publications)
-} else {
-  tibble(hashed_id = character(), publications = character())
-}
-
 prof <- prof |>
-  left_join(rq_data, by = "hashed_id") |>
-  left_join(pub_data, by = "hashed_id")
+  left_join(rq_data, by = "hashed_id")
 
 proj <- proj |>
   left_join(prof, by = "hashed_id") |>
@@ -162,8 +157,39 @@ type_labels <- c(
 )
 
 # JS handlers pour visEvents (extraits pour respecter la limite de 120 car.)
-js_select_node <- "function(p) { Shiny.setInputValue('graph_click_node', {id: p.nodes[0]}, {priority: 'event'}); }"
-js_deselect_node <- "function(p) { Shiny.setInputValue('graph_click_node', {id: null}, {priority: 'event'}); }"
+js_select_node <- "function(p) {
+  Shiny.setInputValue('graph_click_node', {id: p.nodes[0]}, {priority: 'event'});
+  var net = this;
+  net.body.data.nodes.update(
+    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+  );
+  var sel = p.nodes[0];
+  var neighbors = net.getConnectedNodes(sel);
+  neighbors.push(sel);
+  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18}}; }));
+}"
+js_deselect_node <- "function(p) {
+  Shiny.setInputValue('graph_click_node', {id: null}, {priority: 'event'});
+  this.body.data.nodes.update(
+    this.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+  );
+}"
+js_hover_node <- "function(p) {
+  var net = this;
+  var selected = net.getSelectedNodes();
+  if (selected.length > 0) return;
+  var neighbors = net.getConnectedNodes(p.node);
+  neighbors.push(p.node);
+  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18}}; }));
+}"
+js_blur_node <- "function(p) {
+  var net = this;
+  var selected = net.getSelectedNodes();
+  if (selected.length > 0) return;
+  net.body.data.nodes.update(
+    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+  );
+}"
 
 layout_choices <- c(
   "ForceAtlas2 (dynamique)" = "forceatlas2",
@@ -601,7 +627,7 @@ server <- function(input, output, session) {
         scaling = list(min = 8, max = 30),
         borderWidth = 1.5,
         color = list(border = "white", highlight = list(border = "white")),
-        font = list(size = 11, color = "#333333")
+        font = list(size = 11, color = "#333333", bold = list(mod = ""))
       ) |>
       visEdges(
         smooth = list(enabled = TRUE, type = "continuous"),
@@ -624,7 +650,9 @@ server <- function(input, output, session) {
       ) |>
       visEvents(
         selectNode   = js_select_node,
-        deselectNode = js_deselect_node
+        deselectNode = js_deselect_node,
+        hoverNode    = js_hover_node,
+        blurNode     = js_blur_node
       )
 
     if (algo == "forceatlas2") {
@@ -665,7 +693,7 @@ server <- function(input, output, session) {
           scaling = list(min = 8, max = 30),
           borderWidth = 1.5,
           color = list(border = "white", highlight = list(border = "white")),
-          font = list(size = 11, color = "#333333")
+          font = list(size = 11, color = "#333333", bold = list(mod = ""))
         ) |>
         visEdges(
           smooth = list(enabled = TRUE, type = "continuous"),
@@ -773,7 +801,8 @@ server <- function(input, output, session) {
       row <- prof[prof$hashed_id == hid, ]
       inst <- if (nrow(row) > 0 && !is.na(row$institution[1]) && row$institution[1] != "") row$institution[1] else NULL
       rq <- if (nrow(row) > 0 && !is.na(row$research_questions[1])) row$research_questions[1] else NULL
-      pub <- if (nrow(row) > 0 && !is.na(row$publications[1])) row$publications[1] else NULL
+      pub_file <- file.path(pub_files, paste0(hid, "_publications.pdf"))
+      pub <- if (file.exists(pub_file)) paste0("pub_files/", hid, "_publications.pdf") else NULL
 
       tagList(
         div(class = "card-name", label),

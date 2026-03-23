@@ -134,7 +134,7 @@ type_labels <- c(
   eunicoast   = "EUNICoast",
   chercheur   = "Chercheur",
   projet      = "Projet",
-  institution = "Institution",
+  institution = "Affiliation",
   ecr         = "Axe ECR",
   hub         = "Hub EUNICoast",
   lda         = "Topic LDA (papers)",
@@ -499,7 +499,7 @@ ui <- fluidPage(
       checkboxGroupInput("show_types",
         label = "Types de nœuds",
         choices = setNames(names(type_labels), type_labels),
-        selected = names(type_labels)
+        selected = setdiff(names(type_labels), c("institution", "cptmp", "eunicoast", "ecr", "hub"))
       ),
       selectInput("filter_chercheur",
         label = "Chercheur",

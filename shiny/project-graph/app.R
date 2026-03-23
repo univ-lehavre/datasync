@@ -448,8 +448,22 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
 
   degree <- table(c(edges$from, edges$to))
   nodes <- nodes |>
-    mutate(value = as.integer(degree[id])) |>
-    mutate(value = ifelse(is.na(value), 1L, value))
+    mutate(degree = as.numeric(degree[id])) |>
+    mutate(degree = ifelse(is.na(degree), 0, degree))
+
+  # Betweenness centrality via igraph
+  if (nrow(edges) > 0) {
+    g_ig <- graph_from_data_frame(
+      d = edges |> select(from, to),
+      vertices = nodes |> select(name = id),
+      directed = FALSE
+    )
+    btw <- betweenness(g_ig, normalized = TRUE)
+    nodes <- nodes |> mutate(betweenness = as.numeric(btw[id]))
+  } else {
+    nodes <- nodes |> mutate(betweenness = 0)
+  }
+  nodes <- nodes |> mutate(value = degree + 1L)
 
   list(nodes = nodes, edges = edges)
 }
@@ -548,10 +562,19 @@ ui <- fluidPage(
           class = "btn btn-primary btn-sm", style = "width: 100%; margin-top: 4px;"
         )
       ),
+      h6("Taille des nœuds"),
+      selectInput("node_size_metric",
+        label = NULL,
+        choices = c("Degré" = "degree", "Betweenness" = "betweenness"),
+        selected = "degree",
+        width = "100%"
+      ),
       h6("Légende"),
       lapply(names(type_labels), function(t) {
         div(
           class = "legend-item",
+          `data-node-type` = t,
+          style = "cursor: pointer;",
           if (t %in% c("cptmp", "eunicoast")) {
             tags$img(
               src = paste0(t, ".png"), width = 16, height = 16,
@@ -562,7 +585,38 @@ ui <- fluidPage(
           },
           type_labels[t]
         )
-      })
+      }),
+      tags$script(HTML("
+        function getLegendEl() { return document.getElementById('graphgraph'); }
+        document.addEventListener('mouseover', function(e) {
+          var item = e.target.closest('.legend-item[data-node-type]');
+          if (!item) return;
+          var type = item.getAttribute('data-node-type');
+          var el = getLegendEl();
+          if (!el || !el.chart || !el.myclick) return;
+          var ids = el.chart.body.data.nodes.getIds().filter(function(id) {
+            return el.chart.body.data.nodes.get(id).node_type === type;
+          });
+          el.chart.selectNodes(ids);
+          el.myclick({nodes: ids});
+          el.chart.body.data.nodes.update(
+            el.chart.body.data.nodes.getIds().map(function(id) {
+              return {id: id, font: {size: ids.indexOf(id) !== -1 ? 18 : 11}};
+            })
+          );
+        });
+        document.addEventListener('mouseout', function(e) {
+          var item = e.target.closest('.legend-item[data-node-type]');
+          if (!item) return;
+          var el = getLegendEl();
+          if (!el || !el.chart || !el.myclick) return;
+          el.chart.unselectAll();
+          el.myclick({nodes: []});
+          el.chart.body.data.nodes.update(
+            el.chart.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+          );
+        });
+      "))
     ),
     div(
       id = "graph-container",
@@ -612,12 +666,14 @@ server <- function(input, output, session) {
       ))
     }
 
+    metric <- if (!is.null(input$node_size_metric)) input$node_size_metric else "degree"
+
     # Forme des nœuds : circularImage pour cptmp/eunicoast, dot sinon
     nodes <- g$nodes |>
       mutate(
-        shape = if_else(!is.na(image) & !is.na(image), "circularImage", "dot"),
         shape = if_else(node_type %in% c("cptmp", "eunicoast"), "circularImage", "dot"),
-        font.size = 11
+        font.size = 11,
+        value = if (metric == "betweenness") betweenness * 100 + 1 else degree + 1
       )
 
     edges <- g$edges

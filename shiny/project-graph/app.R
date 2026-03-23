@@ -115,18 +115,18 @@ hub_axes <- c(
 # ── Palettes ───────────────────────────────────────────────────────────────────
 
 type_pal <- c(
-  chercheur   = "#2166ac",
-  projet      = "#f4a261",
-  institution = "#1a9850",
-  ecr         = "#e63946",
-  hub         = "#457b9d",
-  cptmp       = "#999999",
-  eunicoast   = "#999999",
-  lda         = "#17becf",
-  topic       = "#d6604d",
-  keyword     = "#4dac26",
-  method      = "#7b2d8b",
-  region      = "#e08214"
+  chercheur   = "#1f77b4", # bleu
+  projet      = "#ff7f0e", # orange vif
+  institution = "#2ca02c", # vert
+  ecr         = "#d62728", # rouge
+  hub         = "#9467bd", # violet
+  cptmp       = "#8c564b", # brun
+  eunicoast   = "#7f7f7f", # gris
+  lda         = "#17becf", # cyan
+  topic       = "#bcbd22", # jaune-vert
+  keyword     = "#e377c2", # rose
+  method      = "#393b79", # bleu nuit
+  region      = "#00b09b" # turquoise
 )
 
 type_labels <- c(

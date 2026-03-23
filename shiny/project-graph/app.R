@@ -156,38 +156,43 @@ type_labels <- c(
   region      = "Région"
 )
 
+# Tailles de police de base (modulées par window.visFontScale côté JS)
 # JS handlers pour visEvents (extraits pour respecter la limite de 120 car.)
 js_select_node <- "function(p) {
   Shiny.setInputValue('graph_click_node', {id: p.nodes[0]}, {priority: 'event'});
+  var s = window.visFontScale || 1;
   var net = this;
   net.body.data.nodes.update(
-    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11 * s}}; })
   );
   var sel = p.nodes[0];
   var neighbors = net.getConnectedNodes(sel);
   neighbors.push(sel);
-  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18}}; }));
+  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18 * s}}; }));
 }"
 js_deselect_node <- "function(p) {
   Shiny.setInputValue('graph_click_node', {id: null}, {priority: 'event'});
+  var s = window.visFontScale || 1;
   this.body.data.nodes.update(
-    this.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+    this.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11 * s}}; })
   );
 }"
 js_hover_node <- "function(p) {
   var net = this;
   var selected = net.getSelectedNodes();
   if (selected.length > 0) return;
+  var s = window.visFontScale || 1;
   var neighbors = net.getConnectedNodes(p.node);
   neighbors.push(p.node);
-  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18}}; }));
+  net.body.data.nodes.update(neighbors.map(function(id) { return {id: id, font: {size: 18 * s}}; }));
 }"
 js_blur_node <- "function(p) {
   var net = this;
   var selected = net.getSelectedNodes();
   if (selected.length > 0) return;
+  var s = window.visFontScale || 1;
   net.body.data.nodes.update(
-    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11}}; })
+    net.body.data.nodes.getIds().map(function(id) { return {id: id, font: {size: 11 * s}}; })
   );
 }"
 
@@ -509,6 +514,7 @@ ui <- fluidPage(
     #node-card .card-close:hover { color: #333; }
   "))),
   tags$script(HTML("
+    window.visFontScale = 1;
     Shiny.addCustomMessageHandler('node_card_toggle', function(msg) {
       var card = document.getElementById('node-card');
       if (msg.visible) {
@@ -516,6 +522,16 @@ ui <- fluidPage(
       } else {
         card.classList.remove('visible');
       }
+    });
+    Shiny.addCustomMessageHandler('font_scale', function(msg) {
+      window.visFontScale = msg.scale;
+      var el = document.getElementById('graphgraph');
+      if (!el || !el.chart) return;
+      el.chart.body.data.nodes.update(
+        el.chart.body.data.nodes.getIds().map(function(id) {
+          return {id: id, font: {size: 11 * msg.scale}};
+        })
+      );
     });
   ")),
   div(
@@ -563,6 +579,9 @@ ui <- fluidPage(
         )
       ),
       h6("Taille des nœuds"),
+      sliderInput("font_scale", "Échelle du texte",
+        min = 0.5, max = 3, value = 1, step = 0.1, width = "100%"
+      ),
       selectInput("node_size_metric",
         label = NULL,
         choices = c("Degré" = "degree", "Betweenness" = "betweenness"),
@@ -819,6 +838,12 @@ server <- function(input, output, session) {
     },
     ignoreInit = TRUE
   )
+
+  # ── Facteur d'échelle texte ──────────────────────────────────────────────────
+
+  observeEvent(input$font_scale, {
+    session$sendCustomMessage("font_scale", list(scale = input$font_scale))
+  })
 
   # ── Carte nœud ──────────────────────────────────────────────────────────────
 

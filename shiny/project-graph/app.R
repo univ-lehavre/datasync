@@ -761,37 +761,58 @@ server <- function(input, output, session) {
 
     g <- graph_data()
     row_node <- g$nodes[g$nodes$id == nid, ]
-    if (nrow(row_node) == 0 || row_node$node_type[1] != "chercheur") {
+    if (nrow(row_node) == 0) {
       return(NULL)
     }
 
+    node_type <- row_node$node_type[1]
     label <- row_node$label[1]
-    hid <- proj$hashed_id[proj$full_name == label][1]
-    row <- prof[prof$hashed_id == hid, ]
 
-    inst <- if (nrow(row) > 0 && !is.na(row$institution[1]) && row$institution[1] != "") row$institution[1] else NULL
-    rq <- if (nrow(row) > 0 && !is.na(row$research_questions[1])) row$research_questions[1] else NULL
-    pub <- if (nrow(row) > 0 && !is.na(row$publications[1])) row$publications[1] else NULL
+    if (node_type == "chercheur") {
+      hid <- proj$hashed_id[proj$full_name == label][1]
+      row <- prof[prof$hashed_id == hid, ]
+      inst <- if (nrow(row) > 0 && !is.na(row$institution[1]) && row$institution[1] != "") row$institution[1] else NULL
+      rq <- if (nrow(row) > 0 && !is.na(row$research_questions[1])) row$research_questions[1] else NULL
+      pub <- if (nrow(row) > 0 && !is.na(row$publications[1])) row$publications[1] else NULL
 
-    tagList(
-      div(class = "card-name", label),
-      if (!is.null(inst)) div(class = "card-inst", inst),
-      if (!is.null(rq)) {
-        tagList(
-          div(class = "card-section", "Questions de recherche"),
-          div(class = "card-text", rq)
-        )
-      },
-      if (!is.null(pub)) {
-        tagList(
-          div(class = "card-section", "Publications"),
-          div(
-            class = "card-text",
-            tags$a(href = pub, target = "_blank", "Voir les publications")
+      tagList(
+        div(class = "card-name", label),
+        if (!is.null(inst)) div(class = "card-inst", inst),
+        if (!is.null(rq)) {
+          tagList(
+            div(class = "card-section", "Questions de recherche"),
+            div(class = "card-text", rq)
           )
-        )
-      }
-    )
+        },
+        if (!is.null(pub)) {
+          tagList(
+            div(class = "card-section", "Publications"),
+            div(
+              class = "card-text",
+              tags$a(href = pub, target = "_blank", "Voir les publications")
+            )
+          )
+        }
+      )
+    } else if (node_type == "projet") {
+      row <- proj[!is.na(proj$acronym) & proj$acronym == label, ]
+      row <- row[1, ]
+      title <- if (!is.na(row$title[1]) && row$title[1] != "") row$title[1] else NULL
+      abstract <- if (!is.na(row$abstract[1]) && row$abstract[1] != "") row$abstract[1] else NULL
+
+      tagList(
+        div(class = "card-name", label),
+        if (!is.null(title)) div(class = "card-inst", title),
+        if (!is.null(abstract)) {
+          tagList(
+            div(class = "card-section", "Résumé"),
+            div(class = "card-text", abstract)
+          )
+        }
+      )
+    } else {
+      return(NULL)
+    }
   })
   outputOptions(output, "node_card_content", suspendWhenHidden = FALSE)
 }

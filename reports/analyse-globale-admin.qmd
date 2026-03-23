@@ -103,275 +103,6 @@ La participation est très élevée — 100% des volontaires ont répondu — sa
 
 Nous sommes en présence d’une communauté active, ce qui est de bonne augure pour la suite du projet.
 
-## Niveau de confidentialité et audience
-
-Pour chaque instrument, nous proposons à l’enquêté de choisir un niveau de confidentialité parmi trois options :
-
-- données identifiables (nom visible), 
-- pseudonymisées (un identifiant remplace le nom), 
-- ou agrégées uniquement (statistiques globales sans données individuelles). 
-
-Il choisit également l’audience autorisée à accéder à ses données :
-
-- les chercheurs authentifiés uniquement,
-- ou le grand public.
-
-```{r}
-#| label: confidentialite-tableau
-instruments_conf <- list(
-  "Profil chercheur"        = c("researcher_profile_identification_level", "researcher_profile_data_audience"),
-  "Questions de recherche"  = c("research_questions_identification_level", "research_questions_data_audience"),
-  "Publications"            = c("publications_identification_level", "publications_data_audience"),
-  "Proposition de projet"   = c("project_proposal_identification_level", "project_proposal_data_audience")
-)
-
-niveaux_conf <- c(
-  "1" = "Identifiable",
-  "2" = "Pseudonymisé",
-  "3" = "Anonymisé",
-  "4" = "Agrégé uniquement"
-)
-ordre_conf <- c("Identifiable", "Pseudonymisé", "Anonymisé", "Agrégé uniquement")
-
-niveaux_aud <- c(
-  "1" = "Grand public",
-  "2" = "Chercheurs authentifiés"
-)
-
-ordre_aud <- c("Grand public", "Chercheurs authentifiés")
-
-complete_cols <- c(
-  "Profil chercheur"       = "researcher_profile_complete",
-  "Questions de recherche" = "research_questions_complete",
-  "Publications"           = "publications_complete",
-  "Proposition de projet"  = "project_proposal_complete"
-)
-
-pct <- function(counts, niveaux) {
-  vals <- paste0(round(as.integer(counts) / sum(as.integer(counts)) * 100), "%")
-  setNames(as.list(vals), niveaux)
-}
-
-map_dfr(names(instruments_conf), function(inst) {
-  conf <- factor(niveaux_conf[as.character(data_raw[[instruments_conf[[inst]][1]]])], levels = ordre_conf)
-  n    <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
-  as_tibble(pct(table(conf)[ordre_conf], ordre_conf)) |>
-    mutate(Instrument = inst, `N` = n, .before = 1)
-}) |>
-  kable(caption = "Confidentialité", align = c("l", "c", rep("c", length(ordre_conf)))) |>
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
-
-map_dfr(names(instruments_conf), function(inst) {
-  aud <- factor(niveaux_aud[as.character(data_raw[[instruments_conf[[inst]][2]]])], levels = ordre_aud)
-  n   <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
-  as_tibble(pct(table(aud)[ordre_aud], ordre_aud)) |>
-    mutate(Instrument = inst, `N` = n, .before = 1)
-}) |>
-  kable(caption = "Audience", align = c("l", "c", rep("c", length(ordre_aud)))) |>
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
-```
-
-### Comportements observés
-
-Les participants sont regroupés par classification ascendante hiérarchique (CAH) sur la base de leurs choix de confidentialité et d'audience pour les quatre instruments. La dissimilarité entre individus est mesurée par la distance de Gower, adaptée aux variables ordinales à échelles mixtes. L'agrégation suit la méthode UPGMA (*average linkage*), qui fusionne les groupes selon la dissimilarité moyenne entre leurs membres — un choix cohérent avec une matrice de Gower non euclidienne, contrairement à la méthode de Ward. Le dendrogramme est découpé en 5 groupes.
-
-```{r}
-#| label: comportements-hclust
-#| fig-width: 10
-#| fig-height: 5
-cols_behav <- c(
-  "researcher_profile_identification_level", "researcher_profile_data_audience",
-  "research_questions_identification_level", "research_questions_data_audience",
-  "publications_identification_level", "publications_data_audience",
-  "project_proposal_identification_level", "project_proposal_data_audience"
-)
-
-mat <- data_raw |>
-  select(all_of(cols_behav)) |>
-  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), "0"))))
-
-d   <- cluster::daisy(mat, metric = "gower")
-hc  <- hclust(d, method = "average")
-k   <- 5
-clusters <- cutree(hc, k = k)
-
-par(mar = c(2, 2, 3, 1))
-plot(hc, labels = FALSE, main = "Dendrogramme des comportements (UPGMA, distance de Gower)", xlab = "", sub = "")
-rect.hclust(hc, k = k, border = c("#e41a1c", "#377eb8", "#4daf4a", "#ff7f00", "#984ea3"))
-```
-
-```{r}
-#| label: comportements-individus
-#| include: false
-data_raw |>
-  select(all_of(cols_behav)) |>
-  mutate(across(ends_with("_identification_level"), ~ niveaux_conf[as.character(.x)])) |>
-  mutate(across(ends_with("_data_audience"),        ~ niveaux_aud[as.character(.x)])) |>
-  mutate(Groupe = factor(clusters)) |>
-  arrange(Groupe) |>
-  set_names(c(
-    "Conf.", "Aud.", "Conf.", "Aud.",
-    "Conf.", "Aud.", "Conf.", "Aud.",
-    "Groupe"
-  )) |>
-  kable() |>
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
-  add_header_above(c(
-    "Profil chercheur" = 2,
-    "Questions de recherche" = 2,
-    "Publications" = 2,
-    "Proposition de projet" = 2,
-    " " = 1
-  ))
-```
-
-
-```{r}
-#| label: profils-moyens
-col_labels <- c(
-  "Conf.", "Aud.", "Conf.", "Aud.",
-  "Conf.", "Aud.", "Conf.", "Aud."
-)
-
-data_raw |>
-  select(all_of(cols_behav)) |>
-  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), NA_character_)))) |>
-  mutate(Groupe = factor(clusters)) |>
-  group_by(Groupe) |>
-  summarise(
-    N = n(),
-    across(all_of(cols_behav), ~ {
-      tbl <- sort(table(.x), decreasing = TRUE)
-      modal_val <- as.integer(names(tbl)[1])
-      if (endsWith(cur_column(), "_identification_level")) {
-        niveaux_conf[as.character(modal_val)]
-      } else {
-        niveaux_aud[as.character(modal_val)]
-      }
-    }),
-    .groups = "drop"
-  ) |>
-  setNames(c("Groupe", "N", col_labels)) |>
-  kable(caption = "Profil modal par groupe") |>
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
-  add_header_above(c(
-    " " = 2,
-    "Profil chercheur" = 2,
-    "Questions de recherche" = 2,
-    "Publications" = 2,
-    "Proposition de projet" = 2
-  ))
-```
-
-### Comportements par instrument
-
-Les choix de confidentialité et d'audience sont-ils stables entre instruments, ou les participants adaptent-ils leurs préférences selon le type de données ?
-
-Le test de Cochran Q exige des réponses complètes sur tous les instruments, ce qui réduit ici l'échantillon à ~15 individus et pénalise sa puissance. Le test de Stuart-Maxwell est préférable : il s'applique par paires d'instruments et tolère les données manquantes. Il teste l'hypothèse de symétrie marginale — autrement dit, si la distribution des réponses est la même pour les deux instruments de la paire.
-
-```{r}
-#| label: stuart-maxwell
-cols_conf <- c(
-  "researcher_profile_identification_level",
-  "research_questions_identification_level",
-  "publications_identification_level",
-  "project_proposal_identification_level"
-)
-cols_aud <- c(
-  "researcher_profile_data_audience",
-  "research_questions_data_audience",
-  "publications_data_audience",
-  "project_proposal_data_audience"
-)
-
-stuart_maxwell <- function(x, y) {
-  d <- data.frame(x = as.integer(x), y = as.integer(y)) |> na.omit()
-  cats <- sort(unique(c(d$x, d$y)))
-  k <- length(cats)
-  if (k < 2) return(tibble(stat = NA_real_, df = NA_integer_, `p-value` = NA_real_, n = nrow(d)))
-  T_mat <- table(factor(d$x, cats), factor(d$y, cats))
-  d_vec <- rowSums(T_mat) - colSums(T_mat)
-  S <- matrix(0, k, k)
-  for (i in 1:k) for (j in 1:k) {
-    S[i, j] <- if (i == j) rowSums(T_mat)[i] + colSums(T_mat)[i] - 2 * T_mat[i, i]
-               else        -(T_mat[i, j] + T_mat[j, i])
-  }
-  idx <- 1:(k - 1)
-  chi2 <- tryCatch(as.numeric(t(d_vec[idx]) %*% solve(S[idx, idx]) %*% d_vec[idx]), error = function(e) NA_real_)
-  p <- if (!is.na(chi2)) pchisq(chi2, df = k - 1, lower.tail = FALSE) else NA_real_
-  tibble(stat = round(chi2, 3), df = k - 1L, `p-value` = round(p, 4), n = nrow(d))
-}
-
-insts <- c("Profil", "Questions", "Publications", "Projet")
-pairs <- combn(4, 2)
-
-res_conf <- map_dfr(1:ncol(pairs), function(i) {
-  a <- pairs[1, i]; b <- pairs[2, i]
-  stuart_maxwell(data_raw[[cols_conf[a]]], data_raw[[cols_conf[b]]]) |>
-    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
-})
-
-res_aud <- map_dfr(1:ncol(pairs), function(i) {
-  a <- pairs[1, i]; b <- pairs[2, i]
-  stuart_maxwell(data_raw[[cols_aud[a]]], data_raw[[cols_aud[b]]]) |>
-    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
-})
-
-bind_rows(
-  res_conf |> mutate(Variable = "Confidentialité", .before = 1),
-  res_aud  |> mutate(Variable = "Audience",        .before = 1)
-) |>
-  kable(caption = "Test de Stuart-Maxwell par paire d'instruments") |>
-  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
-  collapse_rows(columns = 1, valign = "top")
-```
-
-### Transitions entre instruments
-
-```{r}
-#| label: transitions-conf
-#| fig-width: 10
-#| fig-height: 5
-instruments_labels <- c("Profil", "Questions", "Publications", "Projet")
-
-bump_plot <- function(cols, niveaux_map, titre, palette) {
-  data_raw |>
-    select(all_of(cols)) |>
-    mutate(id = row_number()) |>
-    pivot_longer(-id, names_to = "instrument", values_to = "code") |>
-    mutate(
-      instrument = factor(instrument, levels = cols, labels = instruments_labels),
-      niveau = niveaux_map[as.character(code)]
-    ) |>
-    drop_na(niveau) |>
-    count(instrument, niveau) |>
-    mutate(niveau = factor(niveau, levels = rev(names(sort(table(niveau)))))) |>
-    ggplot(aes(x = instrument, y = n, color = niveau, group = niveau)) +
-    geom_line(linewidth = 1.2) +
-    geom_point(size = 3) +
-    geom_text(aes(label = n), vjust = -0.8, size = 3.5, show.legend = FALSE) +
-    scale_color_brewer(palette = palette) +
-    labs(title = titre, x = NULL, y = "Participants", color = NULL) +
-    theme_minimal() +
-    theme(legend.position = "bottom")
-}
-
-bump_plot(cols_conf, niveaux_conf, "Confidentialité par instrument", "Set2")
-```
-
-```{r}
-#| label: transitions-aud
-#| fig-width: 10
-#| fig-height: 4
-bump_plot(cols_aud, niveaux_aud, "Audience par instrument", "Set1")
-```
-
-### Conclusion
-
-Les chercheurs adopte à plus de 80% pour une confidentialité minimale de leurs données. Ils veulent être identifiés, sauf pour la proposition de projet. Une majorité d’entre eux préfèrent toutefois que leurs données soient présentées qu’à un auditoire de chercheurs, excepté pour les publications.
-
-Nous pourrions envisager une disposition commune pour toutes les données recueillies : identification nominative réservé à un auditoire de chercheurs.
-
 ## Profil du chercheur
 
 ```{r}
@@ -480,6 +211,30 @@ htmltools::browsable(htmltools::HTML(paste0(
   paste(cards$card, collapse = ""),
   '</div>'
 )))
+```
+
+### ORCID
+
+```{r}
+#| label: orcid-table
+identifiables |>
+  arrange(last_name, first_name) |>
+  mutate(
+    middle_part = if_else(!is.na(middle_name) & middle_name != "", paste0(" ", middle_name), ""),
+    Nom = paste0(str_to_title(first_name), middle_part, " ", str_to_title(last_name)),
+    ORCID = if_else(
+      !is.na(orcid) & str_trim(orcid) != "",
+      paste0(
+        '<a href="https://orcid.org/', str_trim(orcid), '" target="_blank">',
+        str_trim(orcid), '</a>'
+      ),
+      "—"
+    )
+  ) |>
+  mutate(`#` = row_number()) |>
+  select(`#`, Nom, ORCID) |>
+  knitr::kable(format = "html", escape = FALSE) |>
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 ```
 
 ## Questions de recherche
@@ -1658,3 +1413,272 @@ cards_html <- purrr::map_chr(prof |> arrange(last_name, first_name) |> pull(user
 
 htmltools::browsable(htmltools::HTML(paste(cards_html, collapse = "\n")))
 ```
+
+## Niveau de confidentialité et audience
+
+Pour chaque instrument, nous proposons à l’enquêté de choisir un niveau de confidentialité parmi trois options :
+
+- données identifiables (nom visible), 
+- pseudonymisées (un identifiant remplace le nom), 
+- ou agrégées uniquement (statistiques globales sans données individuelles). 
+
+Il choisit également l’audience autorisée à accéder à ses données :
+
+- les chercheurs authentifiés uniquement,
+- ou le grand public.
+
+```{r}
+#| label: confidentialite-tableau
+instruments_conf <- list(
+  "Profil chercheur"        = c("researcher_profile_identification_level", "researcher_profile_data_audience"),
+  "Questions de recherche"  = c("research_questions_identification_level", "research_questions_data_audience"),
+  "Publications"            = c("publications_identification_level", "publications_data_audience"),
+  "Proposition de projet"   = c("project_proposal_identification_level", "project_proposal_data_audience")
+)
+
+niveaux_conf <- c(
+  "1" = "Identifiable",
+  "2" = "Pseudonymisé",
+  "3" = "Anonymisé",
+  "4" = "Agrégé uniquement"
+)
+ordre_conf <- c("Identifiable", "Pseudonymisé", "Anonymisé", "Agrégé uniquement")
+
+niveaux_aud <- c(
+  "1" = "Grand public",
+  "2" = "Chercheurs authentifiés"
+)
+
+ordre_aud <- c("Grand public", "Chercheurs authentifiés")
+
+complete_cols <- c(
+  "Profil chercheur"       = "researcher_profile_complete",
+  "Questions de recherche" = "research_questions_complete",
+  "Publications"           = "publications_complete",
+  "Proposition de projet"  = "project_proposal_complete"
+)
+
+pct <- function(counts, niveaux) {
+  vals <- paste0(round(as.integer(counts) / sum(as.integer(counts)) * 100), "%")
+  setNames(as.list(vals), niveaux)
+}
+
+map_dfr(names(instruments_conf), function(inst) {
+  conf <- factor(niveaux_conf[as.character(data_raw[[instruments_conf[[inst]][1]]])], levels = ordre_conf)
+  n    <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
+  as_tibble(pct(table(conf)[ordre_conf], ordre_conf)) |>
+    mutate(Instrument = inst, `N` = n, .before = 1)
+}) |>
+  kable(caption = "Confidentialité", align = c("l", "c", rep("c", length(ordre_conf)))) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
+
+map_dfr(names(instruments_conf), function(inst) {
+  aud <- factor(niveaux_aud[as.character(data_raw[[instruments_conf[[inst]][2]]])], levels = ordre_aud)
+  n   <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
+  as_tibble(pct(table(aud)[ordre_aud], ordre_aud)) |>
+    mutate(Instrument = inst, `N` = n, .before = 1)
+}) |>
+  kable(caption = "Audience", align = c("l", "c", rep("c", length(ordre_aud)))) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
+```
+
+### Comportements observés
+
+Les participants sont regroupés par classification ascendante hiérarchique (CAH) sur la base de leurs choix de confidentialité et d'audience pour les quatre instruments. La dissimilarité entre individus est mesurée par la distance de Gower, adaptée aux variables ordinales à échelles mixtes. L'agrégation suit la méthode UPGMA (*average linkage*), qui fusionne les groupes selon la dissimilarité moyenne entre leurs membres — un choix cohérent avec une matrice de Gower non euclidienne, contrairement à la méthode de Ward. Le dendrogramme est découpé en 5 groupes.
+
+```{r}
+#| label: comportements-hclust
+#| fig-width: 10
+#| fig-height: 5
+cols_behav <- c(
+  "researcher_profile_identification_level", "researcher_profile_data_audience",
+  "research_questions_identification_level", "research_questions_data_audience",
+  "publications_identification_level", "publications_data_audience",
+  "project_proposal_identification_level", "project_proposal_data_audience"
+)
+
+mat <- data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), "0"))))
+
+d   <- cluster::daisy(mat, metric = "gower")
+hc  <- hclust(d, method = "average")
+k   <- 5
+clusters <- cutree(hc, k = k)
+
+par(mar = c(2, 2, 3, 1))
+plot(hc, labels = FALSE, main = "Dendrogramme des comportements (UPGMA, distance de Gower)", xlab = "", sub = "")
+rect.hclust(hc, k = k, border = c("#e41a1c", "#377eb8", "#4daf4a", "#ff7f00", "#984ea3"))
+```
+
+```{r}
+#| label: comportements-individus
+#| include: false
+data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(ends_with("_identification_level"), ~ niveaux_conf[as.character(.x)])) |>
+  mutate(across(ends_with("_data_audience"),        ~ niveaux_aud[as.character(.x)])) |>
+  mutate(Groupe = factor(clusters)) |>
+  arrange(Groupe) |>
+  set_names(c(
+    "Conf.", "Aud.", "Conf.", "Aud.",
+    "Conf.", "Aud.", "Conf.", "Aud.",
+    "Groupe"
+  )) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
+  add_header_above(c(
+    "Profil chercheur" = 2,
+    "Questions de recherche" = 2,
+    "Publications" = 2,
+    "Proposition de projet" = 2,
+    " " = 1
+  ))
+```
+
+
+```{r}
+#| label: profils-moyens
+col_labels <- c(
+  "Conf.", "Aud.", "Conf.", "Aud.",
+  "Conf.", "Aud.", "Conf.", "Aud."
+)
+
+data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), NA_character_)))) |>
+  mutate(Groupe = factor(clusters)) |>
+  group_by(Groupe) |>
+  summarise(
+    N = n(),
+    across(all_of(cols_behav), ~ {
+      tbl <- sort(table(.x), decreasing = TRUE)
+      modal_val <- as.integer(names(tbl)[1])
+      if (endsWith(cur_column(), "_identification_level")) {
+        niveaux_conf[as.character(modal_val)]
+      } else {
+        niveaux_aud[as.character(modal_val)]
+      }
+    }),
+    .groups = "drop"
+  ) |>
+  setNames(c("Groupe", "N", col_labels)) |>
+  kable(caption = "Profil modal par groupe") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
+  add_header_above(c(
+    " " = 2,
+    "Profil chercheur" = 2,
+    "Questions de recherche" = 2,
+    "Publications" = 2,
+    "Proposition de projet" = 2
+  ))
+```
+
+### Comportements par instrument
+
+Les choix de confidentialité et d'audience sont-ils stables entre instruments, ou les participants adaptent-ils leurs préférences selon le type de données ?
+
+Le test de Cochran Q exige des réponses complètes sur tous les instruments, ce qui réduit ici l'échantillon à ~15 individus et pénalise sa puissance. Le test de Stuart-Maxwell est préférable : il s'applique par paires d'instruments et tolère les données manquantes. Il teste l'hypothèse de symétrie marginale — autrement dit, si la distribution des réponses est la même pour les deux instruments de la paire.
+
+```{r}
+#| label: stuart-maxwell
+cols_conf <- c(
+  "researcher_profile_identification_level",
+  "research_questions_identification_level",
+  "publications_identification_level",
+  "project_proposal_identification_level"
+)
+cols_aud <- c(
+  "researcher_profile_data_audience",
+  "research_questions_data_audience",
+  "publications_data_audience",
+  "project_proposal_data_audience"
+)
+
+stuart_maxwell <- function(x, y) {
+  d <- data.frame(x = as.integer(x), y = as.integer(y)) |> na.omit()
+  cats <- sort(unique(c(d$x, d$y)))
+  k <- length(cats)
+  if (k < 2) return(tibble(stat = NA_real_, df = NA_integer_, `p-value` = NA_real_, n = nrow(d)))
+  T_mat <- table(factor(d$x, cats), factor(d$y, cats))
+  d_vec <- rowSums(T_mat) - colSums(T_mat)
+  S <- matrix(0, k, k)
+  for (i in 1:k) for (j in 1:k) {
+    S[i, j] <- if (i == j) rowSums(T_mat)[i] + colSums(T_mat)[i] - 2 * T_mat[i, i]
+               else        -(T_mat[i, j] + T_mat[j, i])
+  }
+  idx <- 1:(k - 1)
+  chi2 <- tryCatch(as.numeric(t(d_vec[idx]) %*% solve(S[idx, idx]) %*% d_vec[idx]), error = function(e) NA_real_)
+  p <- if (!is.na(chi2)) pchisq(chi2, df = k - 1, lower.tail = FALSE) else NA_real_
+  tibble(stat = round(chi2, 3), df = k - 1L, `p-value` = round(p, 4), n = nrow(d))
+}
+
+insts <- c("Profil", "Questions", "Publications", "Projet")
+pairs <- combn(4, 2)
+
+res_conf <- map_dfr(1:ncol(pairs), function(i) {
+  a <- pairs[1, i]; b <- pairs[2, i]
+  stuart_maxwell(data_raw[[cols_conf[a]]], data_raw[[cols_conf[b]]]) |>
+    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
+})
+
+res_aud <- map_dfr(1:ncol(pairs), function(i) {
+  a <- pairs[1, i]; b <- pairs[2, i]
+  stuart_maxwell(data_raw[[cols_aud[a]]], data_raw[[cols_aud[b]]]) |>
+    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
+})
+
+bind_rows(
+  res_conf |> mutate(Variable = "Confidentialité", .before = 1),
+  res_aud  |> mutate(Variable = "Audience",        .before = 1)
+) |>
+  kable(caption = "Test de Stuart-Maxwell par paire d'instruments") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  collapse_rows(columns = 1, valign = "top")
+```
+
+### Transitions entre instruments
+
+```{r}
+#| label: transitions-conf
+#| fig-width: 10
+#| fig-height: 5
+instruments_labels <- c("Profil", "Questions", "Publications", "Projet")
+
+bump_plot <- function(cols, niveaux_map, titre, palette) {
+  data_raw |>
+    select(all_of(cols)) |>
+    mutate(id = row_number()) |>
+    pivot_longer(-id, names_to = "instrument", values_to = "code") |>
+    mutate(
+      instrument = factor(instrument, levels = cols, labels = instruments_labels),
+      niveau = niveaux_map[as.character(code)]
+    ) |>
+    drop_na(niveau) |>
+    count(instrument, niveau) |>
+    mutate(niveau = factor(niveau, levels = rev(names(sort(table(niveau)))))) |>
+    ggplot(aes(x = instrument, y = n, color = niveau, group = niveau)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_text(aes(label = n), vjust = -0.8, size = 3.5, show.legend = FALSE) +
+    scale_color_brewer(palette = palette) +
+    labs(title = titre, x = NULL, y = "Participants", color = NULL) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+}
+
+bump_plot(cols_conf, niveaux_conf, "Confidentialité par instrument", "Set2")
+```
+
+```{r}
+#| label: transitions-aud
+#| fig-width: 10
+#| fig-height: 4
+bump_plot(cols_aud, niveaux_aud, "Audience par instrument", "Set1")
+```
+
+### Conclusion
+
+Les chercheurs adopte à plus de 80% pour une confidentialité minimale de leurs données. Ils veulent être identifiés, sauf pour la proposition de projet. Une majorité d’entre eux préfèrent toutefois que leurs données soient présentées qu’à un auditoire de chercheurs, excepté pour les publications.
+
+Nous pourrions envisager une disposition commune pour toutes les données recueillies : identification nominative réservé à un auditoire de chercheurs.

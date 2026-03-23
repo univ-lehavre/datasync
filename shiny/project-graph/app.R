@@ -467,6 +467,38 @@ function(el, x) {
     el.addEventListener('touchend', function() {
       if (s.supervisor) s.startForceAtlas2();
     });
+
+    // ── Surbrillance au survol ──────────────────────────────────────────────
+    s.bind('overNode', function(e) {
+      var nodeId = e.data.node.id;
+      var neighbors = {};
+      neighbors[nodeId] = true;
+      s.graph.edges().forEach(function(edge) {
+        if (edge.source === nodeId) neighbors[edge.target] = true;
+        if (edge.target === nodeId) neighbors[edge.source] = true;
+      });
+      s.graph.nodes().forEach(function(node) {
+        node.originalColor = node.originalColor || node.color;
+        node.color = neighbors[node.id] ? node.originalColor : 'rgba(200,200,200,0.15)';
+      });
+      s.graph.edges().forEach(function(edge) {
+        edge.originalColor = edge.originalColor || edge.color;
+        edge.color = (edge.source === nodeId || edge.target === nodeId)
+          ? 'rgba(100,100,100,0.6)'
+          : 'rgba(200,200,200,0.05)';
+      });
+      s.refresh({ skipIndexation: true });
+    });
+
+    s.bind('outNode', function() {
+      s.graph.nodes().forEach(function(node) {
+        if (node.originalColor) { node.color = node.originalColor; delete node.originalColor; }
+      });
+      s.graph.edges().forEach(function(edge) {
+        if (edge.originalColor) { edge.color = edge.originalColor; delete edge.originalColor; }
+      });
+      s.refresh({ skipIndexation: true });
+    });
   }
 }
 "

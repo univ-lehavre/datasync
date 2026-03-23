@@ -1,10 +1,9 @@
 library(shiny)
-library(sigmajs)
+library(visNetwork)
 library(dplyr)
 library(tidyr)
 library(readr)
 library(igraph)
-library(htmlwidgets)
 
 # ── Données ────────────────────────────────────────────────────────────────────
 
@@ -24,14 +23,12 @@ if (file.exists(lda_topics_path) && file.exists(lda_indiv_path) && file.exists(l
     slice_min(rang, n = 3) |>
     summarise(lda_label = paste(term, collapse = ", "), .groups = "drop") |>
     mutate(lda_id = paste0("LDA_", topic))
-  # lda_individus$userid = ref_id dans biblio_refs → hashed_id → acronym
   biblio <- read_csv(lda_biblio_path, show_col_types = FALSE) |>
     select(ref_id, hashed_id) |>
     distinct()
   source_ids <- read_csv(file.path(data_dir, "nlp-papers", "00_source.csv"),
     show_col_types = FALSE
   ) |> pull(id)
-  # Table projet → LDA (n >= 2 chunks par topic)
   lda_proj <- read_csv(lda_indiv_path, show_col_types = FALSE) |>
     filter(userid %in% source_ids) |>
     select(userid, topic_dominant) |>
@@ -67,7 +64,8 @@ if (file.exists(raw_path)) {
   proj <- proj |> left_join(raw, by = "acronym")
 } else {
   proj <- proj |> mutate(
-    ecr_integration___1 = NA_real_, ecr_integration___2 = NA_real_, ecr_integration___3 = NA_real_,
+    ecr_integration___1 = NA_real_, ecr_integration___2 = NA_real_,
+    ecr_integration___3 = NA_real_,
     eunicoast_integration___1 = NA_real_, eunicoast_integration___2 = NA_real_,
     eunicoast_integration___3 = NA_real_, eunicoast_integration___4 = NA_real_,
     eunicoast_integration___5 = NA_real_
@@ -75,6 +73,9 @@ if (file.exists(raw_path)) {
 }
 
 prof_path <- file.path(dirname(data_dir), "researcher_profile", "identifiables.csv")
+rq_path <- file.path(dirname(data_dir), "research_questions", "identifiables.csv")
+pub_path <- file.path(dirname(data_dir), "publications", "identifiables.csv")
+
 if (file.exists(prof_path)) {
   prof <- read_csv(prof_path, show_col_types = FALSE) |>
     mutate(
@@ -92,6 +93,22 @@ if (file.exists(prof_path)) {
   prof <- proj |> transmute(hashed_id, full_name = hashed_id, institution = NA_character_)
 }
 
+rq_data <- if (file.exists(rq_path)) {
+  read_csv(rq_path, show_col_types = FALSE) |> select(hashed_id, research_questions)
+} else {
+  tibble(hashed_id = character(), research_questions = character())
+}
+
+pub_data <- if (file.exists(pub_path)) {
+  read_csv(pub_path, show_col_types = FALSE) |> select(hashed_id, publications)
+} else {
+  tibble(hashed_id = character(), publications = character())
+}
+
+prof <- prof |>
+  left_join(rq_data, by = "hashed_id") |>
+  left_join(pub_data, by = "hashed_id")
+
 proj <- proj |>
   left_join(prof, by = "hashed_id") |>
   mutate(full_name = coalesce(full_name, hashed_id))
@@ -108,7 +125,7 @@ hub_axes <- c(
   "Identities, Local Knowledge, and Cultural Heritage in Islands & Coastal Communities",
   "Blue Circular Economy, Port Logistics, and Sustainable Blue Tourism",
   "Governance, Planning, Management, and Monitoring of Islands and Coastal Communities",
-  "Health, Biodiversity Protection, Nature-based Solutions, and Sustainable Exploration of Coastal/Marine Resources",
+  "Health, Biodiversity Protection, Nature-based Solutions, and Sustainable Exploration of Coastal/Marine Resources", # nolint: line_length_linter
   "Engineered and Data-driven Solutions for Coastal Infrastructures, Marine Renewable Energy, Marine Safety, and Navigation Systems" # nolint: line_length_linter
 )
 
@@ -144,6 +161,10 @@ type_labels <- c(
   region      = "Région"
 )
 
+# JS handlers pour visEvents (extraits pour respecter la limite de 120 car.)
+js_select_node <- "function(p) { Shiny.setInputValue('graph_click_node', {id: p.nodes[0]}, {priority: 'event'}); }"
+js_deselect_node <- "function(p) { Shiny.setInputValue('graph_click_node', {id: null}, {priority: 'event'}); }"
+
 layout_choices <- c(
   "ForceAtlas2 (dynamique)" = "forceatlas2",
   "Fruchterman-Reingold"    = "fr",
@@ -153,14 +174,10 @@ layout_choices <- c(
   "Aléatoire"               = "random"
 )
 
-# ── Sanitisation des IDs nœuds ─────────────────────────────────────────────────
-# sigmajs plante silencieusement si les IDs contiennent des espaces / caractères spéciaux
-
 make_id <- function(x) {
   gsub("[^A-Za-z0-9_]", "_", trimws(as.character(x)))
 }
 
-# Tables de correspondance label → id pour les types dont l'ID n'est pas déjà simple
 ecr_ids <- setNames(make_id(ecr_axes), ecr_axes)
 hub_ids <- setNames(make_id(hub_axes), hub_axes)
 
@@ -169,27 +186,42 @@ hub_ids <- setNames(make_id(hub_axes), hub_axes)
 build_graph <- function(data, show_types, hide_isolated = FALSE) {
   nodes <- bind_rows(
     if ("cptmp" %in% show_types) {
-      tibble(id = "CPTMP", label = "", node_type = "cptmp", size = 12, image = "cptmp.png")
+      tibble(id = "CPTMP", label = "CPTMP", node_type = "cptmp", size = 12, image = "cptmp.png")
     },
     if ("eunicoast" %in% show_types) {
-      tibble(id = "EUNICoast", label = "", node_type = "eunicoast", size = 12, image = "eunicoast.png")
+      tibble(
+        id = "EUNICoast", label = "EUNICoast", node_type = "eunicoast",
+        size = 12, image = "eunicoast.png"
+      )
     },
     if ("ecr" %in% show_types) {
-      tibble(id = unname(ecr_ids), label = ecr_axes, node_type = "ecr", size = 6, image = NA_character_)
+      tibble(
+        id = unname(ecr_ids), label = ecr_axes,
+        node_type = "ecr", size = 6, image = NA_character_
+      )
     },
     if ("hub" %in% show_types) {
-      tibble(id = unname(hub_ids), label = hub_axes, node_type = "hub", size = 6, image = NA_character_)
+      tibble(
+        id = unname(hub_ids), label = hub_axes,
+        node_type = "hub", size = 6, image = NA_character_
+      )
     },
     if ("chercheur" %in% show_types) {
       data |>
         distinct(full_name) |>
-        transmute(id = make_id(full_name), label = full_name, node_type = "chercheur", size = 5, image = NA_character_)
+        transmute(
+          id = make_id(full_name), label = full_name,
+          node_type = "chercheur", size = 5, image = NA_character_
+        )
     },
     if ("projet" %in% show_types) {
       data |>
         filter(!is.na(acronym) & acronym != "") |>
         distinct(acronym) |>
-        transmute(id = make_id(acronym), label = acronym, node_type = "projet", size = 4, image = NA_character_)
+        transmute(
+          id = make_id(acronym), label = acronym,
+          node_type = "projet", size = 4, image = NA_character_
+        )
     },
     if ("institution" %in% show_types) {
       data |>
@@ -203,46 +235,61 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
     if ("lda" %in% show_types) {
       lda_labels |>
         filter(!is.na(lda_id)) |>
-        transmute(id = make_id(lda_id), label = lda_label, node_type = "lda", size = 3, image = NA_character_)
+        transmute(
+          id = make_id(lda_id), label = lda_label,
+          node_type = "lda", size = 3, image = NA_character_
+        )
     },
     if ("topic" %in% show_types) {
       data |>
         filter(!is.na(topic) & topic != "") |>
         distinct(topic) |>
-        transmute(id = make_id(topic), label = topic, node_type = "topic", size = 4, image = NA_character_)
+        transmute(
+          id = make_id(topic), label = topic,
+          node_type = "topic", size = 4, image = NA_character_
+        )
     },
     if ("keyword" %in% show_types) {
       data |>
         pivot_longer(keyword1:keyword3, values_to = "v") |>
         filter(!is.na(v) & v != "") |>
         distinct(v) |>
-        transmute(id = make_id(v), label = v, node_type = "keyword", size = 2, image = NA_character_)
+        transmute(
+          id = make_id(v), label = v,
+          node_type = "keyword", size = 2, image = NA_character_
+        )
     },
     if ("method" %in% show_types) {
       data |>
         pivot_longer(method1:method3, values_to = "v") |>
         filter(!is.na(v) & v != "") |>
         distinct(v) |>
-        transmute(id = make_id(v), label = v, node_type = "method", size = 2, image = NA_character_)
+        transmute(
+          id = make_id(v), label = v,
+          node_type = "method", size = 2, image = NA_character_
+        )
     },
     if ("region" %in% show_types) {
       data |>
         pivot_longer(region1:region3, values_to = "v") |>
         filter(!is.na(v) & v != "") |>
         distinct(v) |>
-        transmute(id = make_id(v), label = v, node_type = "region", size = 2, image = NA_character_)
+        transmute(
+          id = make_id(v), label = v,
+          node_type = "region", size = 2, image = NA_character_
+        )
     }
   ) |>
     distinct(id, .keep_all = TRUE) |>
     mutate(color = type_pal[node_type])
 
-  empty_edges <- tibble(id = character(), source = character(), target = character())
+  empty_edges <- tibble(from = character(), to = character(), id = character())
 
   mk_edges <- function(cond, pfx, src, tgt) {
     if (!cond) {
       return(empty_edges)
     }
-    d <- tibble(source = as.character(src), target = as.character(tgt))
+    d <- tibble(from = as.character(src), to = as.character(tgt))
     d |> mutate(id = paste0(pfx, row_number()))
   }
 
@@ -256,7 +303,6 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
       "eh", rep("EUNICoast", length(hub_ids)), unname(hub_ids)
     ),
     {
-      # Projet → axes ECR via colonnes checkbox ___1/2/3
       if (!all(c("projet", "ecr") %in% show_types)) {
         empty_edges
       } else {
@@ -272,13 +318,12 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           }
           tibble(
             id = paste0("pe", i, "_", seq_len(nrow(rows))),
-            source = make_id(rows$acronym), target = ecr_ids[ecr_axes[i]]
+            from = make_id(rows$acronym), to = ecr_ids[ecr_axes[i]]
           )
         }))
       }
     },
     {
-      # Projet → hubs EUNICoast via colonnes checkbox ___1/2/3/4/5
       if (!all(c("projet", "hub") %in% show_types)) {
         empty_edges
       } else {
@@ -294,7 +339,7 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           }
           tibble(
             id = paste0("ph", i, "_", seq_len(nrow(rows))),
-            source = make_id(rows$acronym), target = hub_ids[hub_axes[i]]
+            from = make_id(rows$acronym), to = hub_ids[hub_axes[i]]
           )
         }))
       }
@@ -316,8 +361,12 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
     ),
     mk_edges(
       all(c("projet", "topic") %in% show_types), "pt",
-      make_id(data$acronym[!is.na(data$acronym) & data$acronym != "" & !is.na(data$topic) & data$topic != ""]),
-      make_id(data$topic[!is.na(data$acronym) & data$acronym != "" & !is.na(data$topic) & data$topic != ""])
+      make_id(data$acronym[
+        !is.na(data$acronym) & data$acronym != "" & !is.na(data$topic) & data$topic != ""
+      ]),
+      make_id(data$topic[
+        !is.na(data$acronym) & data$acronym != "" & !is.na(data$topic) & data$topic != ""
+      ])
     ),
     {
       if (!all(c("projet", "lda") %in% show_types)) {
@@ -328,7 +377,7 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           distinct(hashed_id, acronym)
         lda_proj |>
           inner_join(proj_acronyms, by = "hashed_id") |>
-          transmute(id = paste0("pl", row_number()), source = make_id(acronym), target = make_id(lda_id))
+          transmute(id = paste0("pl", row_number()), from = make_id(acronym), to = make_id(lda_id))
       }
     },
     {
@@ -339,7 +388,7 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           filter(!is.na(acronym) & acronym != "") |>
           pivot_longer(keyword1:keyword3, values_to = "v") |>
           filter(!is.na(v) & v != "") |>
-          transmute(id = paste0("ck_", row_number()), source = make_id(acronym), target = make_id(v))
+          transmute(id = paste0("ck_", row_number()), from = make_id(acronym), to = make_id(v))
       }
     },
     {
@@ -350,7 +399,7 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           filter(!is.na(acronym) & acronym != "") |>
           pivot_longer(method1:method3, values_to = "v") |>
           filter(!is.na(v) & v != "") |>
-          transmute(id = paste0("pm_", row_number()), source = make_id(acronym), target = make_id(v))
+          transmute(id = paste0("pm_", row_number()), from = make_id(acronym), to = make_id(v))
       }
     },
     {
@@ -361,151 +410,23 @@ build_graph <- function(data, show_types, hide_isolated = FALSE) {
           filter(!is.na(acronym) & acronym != "") |>
           pivot_longer(region1:region3, values_to = "v") |>
           filter(!is.na(v) & v != "") |>
-          transmute(id = paste0("pr_", row_number()), source = make_id(acronym), target = make_id(v))
+          transmute(id = paste0("pr_", row_number()), from = make_id(acronym), to = make_id(v))
       }
     }
   ) |>
-    filter(source %in% nodes$id & target %in% nodes$id) |>
-    distinct(source, target, .keep_all = TRUE) |>
-    mutate(color = "#cccccc")
+    filter(from %in% nodes$id & to %in% nodes$id) |>
+    distinct(from, to, .keep_all = TRUE)
 
-  connected <- union(edges$source, edges$target)
+  connected <- union(edges$from, edges$to)
   nodes <- nodes |> filter(!hide_isolated | id %in% connected)
 
-  degree <- table(c(edges$source, edges$target))
+  degree <- table(c(edges$from, edges$to))
   nodes <- nodes |>
-    mutate(
-      size = 2 + 3 * sqrt(as.integer(degree[id]))
-    ) |>
-    mutate(size = ifelse(is.na(size), 2, size))
+    mutate(value = as.integer(degree[id])) |>
+    mutate(value = ifelse(is.na(value), 1L, value))
 
   list(nodes = nodes, edges = edges)
 }
-
-apply_igraph_layout <- function(nodes, edges, layout_fn) {
-  if (nrow(nodes) == 0) {
-    return(mutate(nodes, x = numeric(0), y = numeric(0)))
-  }
-  g <- graph_from_data_frame(
-    d        = edges |> select(from = source, to = target),
-    vertices = nodes |> select(name = id),
-    directed = FALSE
-  )
-  coords <- layout_fn(g)
-  nodes |> mutate(x = coords[, 1] * 10, y = coords[, 2] * 10)
-}
-
-# ── JS : renderer image pour nœuds CPTMP / EUNICoast ──────────────────────────
-
-image_renderer_js <- "
-function(el, x) {
-  // Renderer sigma pour les nœuds image (CPTMP / EUNICoast)
-  sigma.canvas.nodes.image = (function() {
-    var _cache = {};
-    var _loading = {};
-    return function(node, context, settings) {
-      var prefix = settings('prefix') || '';
-      var size   = node[prefix + 'size'] || 1;
-      var nx     = node[prefix + 'x'];
-      var ny     = node[prefix + 'y'];
-      if (node.image && node.image !== 'NA') {
-        var img = _cache[node.image];
-        if (!img) {
-          if (!_loading[node.image]) {
-            _loading[node.image] = true;
-            var i = new Image();
-            i.onload = function() {
-              _cache[node.image] = i;
-              var w = HTMLWidgets.find('#' + el.id);
-              var s = w ? w.getChart() : null;
-              if (s) s.refresh();
-            };
-            i.src = node.image;
-          }
-          context.fillStyle = node.color || '#999';
-          context.beginPath();
-          context.arc(nx, ny, size, 0, Math.PI * 2, true);
-          context.closePath();
-          context.fill();
-          return;
-        }
-        context.save();
-        context.beginPath();
-        context.arc(nx, ny, size, 0, Math.PI * 2, true);
-        context.closePath();
-        context.clip();
-        var iw = img.naturalWidth  || img.width;
-        var ih = img.naturalHeight || img.height;
-        var scale = (size * 2) / Math.max(iw, ih);
-        context.drawImage(img, nx - iw * scale / 2, ny - ih * scale / 2, iw * scale, ih * scale);
-        context.restore();
-        context.strokeStyle = '#ffffff';
-        context.lineWidth   = size * 0.1;
-        context.beginPath();
-        context.arc(nx, ny, size, 0, Math.PI * 2, true);
-        context.closePath();
-        context.stroke();
-      } else {
-        context.fillStyle = node.color || '#ccc';
-        context.beginPath();
-        context.arc(nx, ny, size, 0, Math.PI * 2, true);
-        context.closePath();
-        context.fill();
-      }
-    };
-  })();
-
-  var widget = HTMLWidgets.find('#' + el.id);
-  var s = widget ? widget.getChart() : null;
-  if (s) {
-    s.bind('downNode', function() {
-      if (s.isForceAtlas2Running()) s.stopForceAtlas2();
-    });
-    el.addEventListener('mouseup', function() {
-      var cur = HTMLWidgets.find('#' + el.id);
-      var sc = cur ? cur.getChart() : null;
-      if (sc && sc.supervisor && sc.isForceAtlas2Running()) sc.startForceAtlas2();
-    });
-    el.addEventListener('touchend', function() {
-      var cur = HTMLWidgets.find('#' + el.id);
-      var sc = cur ? cur.getChart() : null;
-      if (sc && sc.supervisor && sc.isForceAtlas2Running()) sc.startForceAtlas2();
-    });
-
-    // ── Surbrillance au survol ──────────────────────────────────────────────
-    s.bind('overNode', function(e) {
-      var nodeId = e.data.node.id;
-      var neighbors = {};
-      neighbors[nodeId] = true;
-      s.graph.edges().forEach(function(edge) {
-        if (edge.source === nodeId) neighbors[edge.target] = true;
-        if (edge.target === nodeId) neighbors[edge.source] = true;
-      });
-      s.graph.nodes().forEach(function(node) {
-        node.originalColor = node.originalColor || node.color;
-        node.color = neighbors[node.id] ? node.originalColor : 'rgba(200,200,200,0.15)';
-      });
-      s.graph.edges().forEach(function(edge) {
-        edge.originalColor = edge.originalColor || edge.color;
-        edge.color = (edge.source === nodeId || edge.target === nodeId)
-          ? 'rgba(100,100,100,0.6)'
-          : 'rgba(200,200,200,0.05)';
-      });
-      s.refresh({ skipIndexation: true });
-    });
-
-    s.bind('outNode', function() {
-      s.graph.nodes().forEach(function(node) {
-        if (node.originalColor) { node.color = node.originalColor; delete node.originalColor; }
-      });
-      s.graph.edges().forEach(function(edge) {
-        if (edge.originalColor) { edge.color = edge.originalColor; delete edge.originalColor; }
-      });
-      s.refresh({ skipIndexation: true });
-    });
-  }
-}
-"
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
 
@@ -518,15 +439,45 @@ ui <- fluidPage(
       background: #f8f9fa; border-right: 1px solid #dee2e6;
       padding: 14px 14px 20px; box-sizing: border-box;
     }
-    .sidebar h6 { font-size: 11px; text-transform: uppercase; color: #888; margin: 16px 0 6px; letter-spacing: 0.05em; }
+    .sidebar h6 {
+      font-size: 11px; text-transform: uppercase; color: #888;
+      margin: 16px 0 6px; letter-spacing: 0.05em;
+    }
     .sidebar h6:first-child { margin-top: 0; }
-    #sigma-container { flex: 1; height: 100vh; }
+    #graph-container { flex: 1; height: 100vh; }
     .legend-item { display: flex; align-items: center; gap: 7px; font-size: 13px; margin-bottom: 5px; }
     .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
     .form-group { margin-bottom: 6px; }
-    .irs--shiny .irs-bar { background: #2166ac; border-color: #2166ac; }
-    .irs--shiny .irs-handle { background: #2166ac; }
+    #node-card {
+      position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+      width: 320px; background: #fff; border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.18); padding: 16px;
+      font-size: 13px; line-height: 1.5; display: none;
+    }
+    #node-card.visible { display: block; }
+    #node-card .card-name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    #node-card .card-inst { color: #666; margin-bottom: 10px; font-size: 12px; }
+    #node-card .card-section {
+      font-size: 11px; text-transform: uppercase; color: #999;
+      letter-spacing: 0.05em; margin-bottom: 4px;
+    }
+    #node-card .card-text { color: #333; margin-bottom: 10px; }
+    #node-card .card-close {
+      position: absolute; top: 10px; right: 12px; cursor: pointer;
+      color: #aaa; font-size: 16px; line-height: 1;
+    }
+    #node-card .card-close:hover { color: #333; }
   "))),
+  tags$script(HTML("
+    Shiny.addCustomMessageHandler('node_card_toggle', function(msg) {
+      var card = document.getElementById('node-card');
+      if (msg.visible) {
+        card.classList.add('visible');
+      } else {
+        card.classList.remove('visible');
+      }
+    });
+  ")),
   div(
     class = "layout-wrapper",
     div(
@@ -552,10 +503,8 @@ ui <- fluidPage(
       ),
       conditionalPanel(
         condition = "input.layout_algo == 'forceatlas2'",
-        sliderInput("gravity", "Gravity", min = 0.1, max = 5, value = 1, step = 0.1, width = "100%"),
-        sliderInput("scaling", "Compacité", min = 0.5, max = 10, value = 2, step = 0.5, width = "100%"),
-        sliderInput("slowdown", "Slow down", min = 1, max = 20, value = 5, step = 1, width = "100%"),
-        sliderInput("edge_weight", "Edge weight", min = 0, max = 1, value = 0, step = 0.1, width = "100%"),
+        sliderInput("gravity", "Gravity", min = 1, max = 100, value = 50, step = 1, width = "100%"),
+        sliderInput("spring_length", "Spring length", min = 10, max = 300, value = 100, step = 10, width = "100%"),
         div(
           style = "display: flex; gap: 6px; margin-top: 8px;",
           actionButton("relayout", "Relancer",
@@ -573,31 +522,15 @@ ui <- fluidPage(
           class = "btn btn-primary btn-sm", style = "width: 100%; margin-top: 4px;"
         )
       ),
-      h6("Zoom"),
-      div(
-        style = "display: flex; gap: 6px;",
-        tags$button("＋",
-          class = "btn btn-outline-secondary btn-sm", style = "flex:1;",
-          onclick = "var s=HTMLWidgets.find('#graph').getChart();s.cameras[0].goTo({ratio:s.cameras[0].ratio/1.5});"
-        ),
-        tags$button("−",
-          class = "btn btn-outline-secondary btn-sm", style = "flex:1;",
-          onclick = "var s=HTMLWidgets.find('#graph').getChart();s.cameras[0].goTo({ratio:s.cameras[0].ratio*1.5});"
-        ),
-        tags$button("⌂",
-          class = "btn btn-outline-secondary btn-sm", style = "flex:1;",
-          onclick = "var s=HTMLWidgets.find('#graph').getChart();s.cameras[0].goTo({x:0,y:0,ratio:1});",
-          title = "Réinitialiser la vue"
-        )
-      ),
       h6("Légende"),
       lapply(names(type_labels), function(t) {
         div(
           class = "legend-item",
-          if (t == "cptmp") {
-            tags$img(src = "cptmp.png", width = 16, height = 16, style = "border-radius:50%;flex-shrink:0;")
-          } else if (t == "eunicoast") {
-            tags$img(src = "eunicoast.png", width = 16, height = 16, style = "border-radius:50%;flex-shrink:0;")
+          if (t %in% c("cptmp", "eunicoast")) {
+            tags$img(
+              src = paste0(t, ".png"), width = 16, height = 16,
+              style = "border-radius:50%;flex-shrink:0;"
+            )
           } else {
             span(class = "legend-dot", style = sprintf("background:%s;", type_pal[t]))
           },
@@ -606,8 +539,17 @@ ui <- fluidPage(
       })
     ),
     div(
-      id = "sigma-container",
-      sigmajsOutput("graph", width = "100%", height = "100%")
+      id = "graph-container",
+      visNetworkOutput("graph", width = "100%", height = "100%"),
+      div(
+        id = "node-card",
+        span(
+          class = "card-close",
+          onclick = "document.getElementById('node-card').classList.remove('visible');",
+          "×"
+        ),
+        uiOutput("node_card_content")
+      )
     )
   )
 )
@@ -631,101 +573,227 @@ server <- function(input, output, session) {
     build_graph(filtered_data(), show, hide_isolated = TRUE)
   })
 
-  output$graph <- renderSigmajs({
-    g <- graph_data()
-    algo <- input$layout_algo
-    if (nrow(g$nodes) == 0) {
-      return(sigmajs())
-    }
-
-    layout_fn <- switch(algo,
-      fr = igraph::layout_with_fr,
-      kk = igraph::layout_with_kk,
-      circle = igraph::layout_in_circle,
-      grid = igraph::layout_on_grid,
-      random = igraph::layout_randomly,
-      function(x) matrix(runif(vcount(x) * 2, -10, 10), ncol = 2)
-    )
-
-    nodes <- if (algo == "forceatlas2" || nrow(g$edges) == 0) {
-      g$nodes |> mutate(x = runif(n(), -10, 10), y = runif(n(), -10, 10))
-    } else {
-      tryCatch(
-        apply_igraph_layout(g$nodes, g$edges, layout_fn),
-        error = function(e) g$nodes |> mutate(x = runif(n(), -10, 10), y = runif(n(), -10, 10))
-      )
-    }
-
-    # Affecter le type renderer "image" aux nœuds avec image
-    nodes <- nodes |> mutate(
-      type = if_else(!is.na(image) & image != "NA", "image", "circle")
-    )
-
-    sg <- sigmajs() |>
-      sg_nodes(nodes, id, label, size, color, x, y, type, image) |>
-      sg_edges(g$edges, id, source, target, color) |>
-      sg_settings(
-        defaultEdgeColor  = "#cccccc",
-        minNodeSize       = 2,
-        maxNodeSize       = 14,
-        labelThreshold    = 2,
-        drawEdges         = TRUE,
-        defaultLabelColor = "#333333"
-      ) |>
-      sg_drag_nodes() |>
-      onRender(image_renderer_js)
-
-    if (algo == "forceatlas2") {
-      sg <- sg |> sg_force_start(
-        worker              = TRUE,
-        randomize           = TRUE,
-        gravity             = input$gravity,
-        scalingRatio        = input$scaling,
-        slowDown            = input$slowdown,
-        edgeWeightInfluence = input$edge_weight
-      )
-      force_running(TRUE)
-      updateActionButton(session, "toggle_force", label = "⏸")
-    }
-
-    sg
-  })
-
   force_running <- reactiveVal(TRUE)
 
+  output$graph <- renderVisNetwork({
+    g <- graph_data()
+    algo <- input$layout_algo
+
+    if (nrow(g$nodes) == 0) {
+      return(visNetwork(
+        tibble(id = 1, label = "Aucun nœud"),
+        tibble(from = integer(), to = integer())
+      ))
+    }
+
+    # Forme des nœuds : circularImage pour cptmp/eunicoast, dot sinon
+    nodes <- g$nodes |>
+      mutate(
+        shape = if_else(!is.na(image) & !is.na(image), "circularImage", "dot"),
+        shape = if_else(node_type %in% c("cptmp", "eunicoast"), "circularImage", "dot"),
+        font.size = 11
+      )
+
+    edges <- g$edges
+
+    net <- visNetwork(nodes, edges) |>
+      visNodes(
+        scaling = list(min = 8, max = 30),
+        borderWidth = 1.5,
+        color = list(border = "white", highlight = list(border = "white")),
+        font = list(size = 11, color = "#333333")
+      ) |>
+      visEdges(
+        smooth = list(enabled = TRUE, type = "continuous"),
+        color  = list(color = "#cccccc", highlight = "#888888", hover = "#888888")
+      ) |>
+      visOptions(
+        highlightNearest = list(
+          enabled   = TRUE,
+          degree    = 1,
+          hover     = TRUE,
+          algorithm = "hierarchical"
+        )
+      ) |>
+      visInteraction(
+        dragNodes     = TRUE,
+        dragView      = TRUE,
+        zoomView      = TRUE,
+        hover         = TRUE,
+        tooltipDelay  = 200
+      ) |>
+      visEvents(
+        selectNode   = js_select_node,
+        deselectNode = js_deselect_node
+      )
+
+    if (algo == "forceatlas2") {
+      net <- net |>
+        visPhysics(
+          solver = "forceAtlas2Based",
+          forceAtlas2Based = list(
+            gravitationalConstant = -input$gravity,
+            springLength          = input$spring_length,
+            springConstant        = 0.08,
+            damping               = 0.4,
+            avoidOverlap          = 0.5
+          ),
+          stabilization = list(enabled = TRUE, iterations = 200)
+        )
+      force_running(TRUE)
+      updateActionButton(session, "toggle_force", label = "⏸")
+    } else {
+      layout_fn <- switch(algo,
+        fr     = igraph::layout_with_fr,
+        kk     = igraph::layout_with_kk,
+        circle = igraph::layout_in_circle,
+        grid   = igraph::layout_on_grid,
+        random = igraph::layout_randomly,
+        igraph::layout_randomly
+      )
+      g_igraph <- graph_from_data_frame(
+        d        = g$edges |> select(from, to),
+        vertices = g$nodes |> select(name = id),
+        directed = FALSE
+      )
+      coords <- layout_fn(g_igraph)
+      nodes_with_pos <- nodes |>
+        mutate(x = coords[, 1] * 500, y = coords[, 2] * 500)
+
+      net <- visNetwork(nodes_with_pos, edges) |>
+        visNodes(
+          scaling = list(min = 8, max = 30),
+          borderWidth = 1.5,
+          color = list(border = "white", highlight = list(border = "white")),
+          font = list(size = 11, color = "#333333")
+        ) |>
+        visEdges(
+          smooth = list(enabled = TRUE, type = "continuous"),
+          color  = list(color = "#cccccc", highlight = "#888888", hover = "#888888")
+        ) |>
+        visOptions(
+          highlightNearest = list(
+            enabled   = TRUE,
+            degree    = 1,
+            hover     = TRUE,
+            algorithm = "hierarchical"
+          )
+        ) |>
+        visInteraction(dragNodes = TRUE, dragView = TRUE, zoomView = TRUE, hover = TRUE) |>
+        visEvents(
+          selectNode   = js_select_node,
+          deselectNode = js_deselect_node
+        ) |>
+        visPhysics(enabled = FALSE)
+    }
+
+    net
+  })
+
+  # ── Pause / reprise layout ───────────────────────────────────────────────────
+
   observeEvent(input$toggle_force, {
-    proxy <- sigmajsProxy("graph")
     if (force_running()) {
-      sg_force_stop_p(proxy)
+      visNetworkProxy("graph") |> visPhysics(enabled = FALSE)
       force_running(FALSE)
       updateActionButton(session, "toggle_force", label = "▶")
     } else {
-      sg_force_start_p(proxy,
-        gravity             = input$gravity,
-        scalingRatio        = input$scaling,
-        slowDown            = input$slowdown,
-        edgeWeightInfluence = input$edge_weight
-      )
+      visNetworkProxy("graph") |>
+        visPhysics(
+          enabled = TRUE,
+          solver = "forceAtlas2Based",
+          forceAtlas2Based = list(
+            gravitationalConstant = -input$gravity,
+            springLength          = input$spring_length,
+            springConstant        = 0.08,
+            damping               = 0.4,
+            avoidOverlap          = 0.5
+          )
+        )
       force_running(TRUE)
       updateActionButton(session, "toggle_force", label = "⏸")
     }
   })
 
   observeEvent(
-    list(input$gravity, input$scaling, input$slowdown, input$edge_weight),
+    list(input$gravity, input$spring_length),
     {
       if (force_running() && input$layout_algo == "forceatlas2") {
-        proxy <- sigmajsProxy("graph")
-        sg_force_start_p(proxy,
-          gravity             = input$gravity,
-          scalingRatio        = input$scaling,
-          slowDown            = input$slowdown,
-          edgeWeightInfluence = input$edge_weight
-        )
+        visNetworkProxy("graph") |>
+          visPhysics(
+            enabled = TRUE,
+            solver = "forceAtlas2Based",
+            forceAtlas2Based = list(
+              gravitationalConstant = -input$gravity,
+              springLength          = input$spring_length,
+              springConstant        = 0.08,
+              damping               = 0.4,
+              avoidOverlap          = 0.5
+            )
+          )
       }
     },
     ignoreInit = TRUE
   )
+
+  # ── Carte nœud ──────────────────────────────────────────────────────────────
+
+  selected_node_id <- reactiveVal(NULL)
+
+  observeEvent(input$graph_click_node, {
+    nid <- input$graph_click_node$id
+    if (!is.null(nid) && !is.na(nid)) {
+      selected_node_id(nid)
+    } else {
+      selected_node_id(NULL)
+    }
+  })
+
+  observe({
+    session$sendCustomMessage("node_card_toggle", list(visible = !is.null(selected_node_id())))
+  })
+
+  output$node_card_content <- renderUI({
+    nid <- selected_node_id()
+    if (is.null(nid)) {
+      return(NULL)
+    }
+
+    g <- graph_data()
+    row_node <- g$nodes[g$nodes$id == nid, ]
+    if (nrow(row_node) == 0 || row_node$node_type[1] != "chercheur") {
+      return(NULL)
+    }
+
+    label <- row_node$label[1]
+    hid <- proj$hashed_id[proj$full_name == label][1]
+    row <- prof[prof$hashed_id == hid, ]
+
+    inst <- if (nrow(row) > 0 && !is.na(row$institution[1]) && row$institution[1] != "") row$institution[1] else NULL
+    rq <- if (nrow(row) > 0 && !is.na(row$research_questions[1])) row$research_questions[1] else NULL
+    pub <- if (nrow(row) > 0 && !is.na(row$publications[1])) row$publications[1] else NULL
+
+    tagList(
+      div(class = "card-name", label),
+      if (!is.null(inst)) div(class = "card-inst", inst),
+      if (!is.null(rq)) {
+        tagList(
+          div(class = "card-section", "Questions de recherche"),
+          div(class = "card-text", rq)
+        )
+      },
+      if (!is.null(pub)) {
+        tagList(
+          div(class = "card-section", "Publications"),
+          div(
+            class = "card-text",
+            tags$a(href = pub, target = "_blank", "Voir les publications")
+          )
+        )
+      }
+    )
+  })
+  outputOptions(output, "node_card_content", suspendWhenHidden = FALSE)
 }
 
 shinyApp(ui, server)

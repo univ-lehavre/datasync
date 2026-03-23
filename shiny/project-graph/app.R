@@ -535,7 +535,7 @@ ui <- fluidPage(
       checkboxGroupInput("show_types",
         label = "Types de nœuds",
         choices = setNames(names(type_labels), type_labels),
-        selected = setdiff(names(type_labels), c("institution", "cptmp", "eunicoast", "hub"))
+        selected = setdiff(names(type_labels), c("institution", "cptmp", "eunicoast", "hub", "lda"))
       ),
       selectInput("filter_chercheur",
         label = "Chercheur",

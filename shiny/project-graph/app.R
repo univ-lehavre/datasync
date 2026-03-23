@@ -462,10 +462,14 @@ function(el, x) {
       if (s.isForceAtlas2Running()) s.stopForceAtlas2();
     });
     el.addEventListener('mouseup', function() {
-      if (s.supervisor) s.startForceAtlas2();
+      var cur = HTMLWidgets.find('#' + el.id);
+      var sc = cur ? cur.getChart() : null;
+      if (sc && sc.supervisor && sc.isForceAtlas2Running()) sc.startForceAtlas2();
     });
     el.addEventListener('touchend', function() {
-      if (s.supervisor) s.startForceAtlas2();
+      var cur = HTMLWidgets.find('#' + el.id);
+      var sc = cur ? cur.getChart() : null;
+      if (sc && sc.supervisor && sc.isForceAtlas2Running()) sc.startForceAtlas2();
     });
 
     // ── Surbrillance au survol ──────────────────────────────────────────────

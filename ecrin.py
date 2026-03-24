@@ -688,13 +688,13 @@ def preview() -> None:
     nlp_missing: list[str] = []
     for entry in nlp_fields:
         inst_dir = stack_instrument_dir(name, entry["instrument"])
-        field = entry["field"]
-        nlp_dir = inst_dir / f"nlp-{field}"
+        nlp_name = entry.get("name") or entry.get("field") or "-".join(entry.get("fields", []))
+        nlp_dir = inst_dir / f"nlp-{nlp_name}"
         key = instrument_state_key(entry["instrument"], audience)
         inst_files = redcap_state.get(key, {}).get("files", {})
-        has_sha = any(k.startswith(f"nlp-{field}/") for k in inst_files)
+        has_sha = any(k.startswith(f"nlp-{nlp_name}/") for k in inst_files)
         if not nlp_dir.exists() or not has_sha:
-            nlp_missing.append(f"{entry['instrument']}/{field}")
+            nlp_missing.append(f"{entry['instrument']}/{nlp_name}")
 
     n_actions = sum(1 for d in diff if d["action"] != "ok")
     n_ok = sum(1 for d in diff if d["action"] == "ok")
@@ -707,11 +707,12 @@ def preview() -> None:
             inst_key = instrument_state_key(inst["name"], audience)
             inst_files = redcap_state.get(inst_key, {}).get("files", {})
             inst_nlp_missing = [
-                e["field"] for e in nlp_fields
+                (e.get("name") or e.get("field") or "-".join(e.get("fields", [])))
+                for e in nlp_fields
                 if e["instrument"] == inst["name"]
                 and (
-                    not (stack_instrument_dir(name, inst["name"]) / f"nlp-{e['field']}").exists()
-                    or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files)
+                    not (stack_instrument_dir(name, inst["name"]) / f"nlp-{e.get('name') or e.get('field') or '-'.join(e.get('fields', []))}").exists()
+                    or not any(k.startswith(f"nlp-{e.get('name') or e.get('field') or '-'.join(e.get('fields', []))}/") for k in inst_files)
                 )
             ]
             nlp_note = f" [yellow](NLP manquant : {', '.join(inst_nlp_missing)})[/yellow]" if inst_nlp_missing else ""
@@ -809,8 +810,8 @@ def up() -> None:
             ]
             inst_files_ok = redcap_state.get(key, {}).get("files", {})
             nlp_pending = any(
-                not (inst_data_dir_ok / f"nlp-{e['field']}").exists()
-                or not any(k.startswith(f"nlp-{e['field']}/") for k in inst_files_ok)
+                not (inst_data_dir_ok / f"nlp-{e.get('name') or e.get('field') or '-'.join(e.get('fields', []))}").exists()
+                or not any(k.startswith(f"nlp-{e.get('name') or e.get('field') or '-'.join(e.get('fields', []))}/") for k in inst_files_ok)
                 for e in nlp_entries_ok
             )
             file_nlp_merged_ok = [
@@ -930,8 +931,11 @@ def up() -> None:
         nlp_csv = inst_data_dir / "nlp.csv"
         if nlp_entries and nlp_csv.exists():
             for entry in nlp_entries:
-                field = entry["field"]
-                output_dir = inst_data_dir / f"nlp-{field}"
+                # Supporte "field" (scalaire) ou "fields" (liste) + "name" pour le répertoire
+                fields = entry.get("fields") or [entry["field"]]
+                nlp_name = entry.get("name") or entry.get("field") or "-".join(fields)
+                id_level_field = entry.get("id_level_field")
+                output_dir = inst_data_dir / f"nlp-{nlp_name}"
                 output_dir.mkdir(parents=True, exist_ok=True)
                 profile_inst = next(
                     (i for i in all_instruments if "researcher_profile" in i.get("instrument_name", "")),
@@ -942,14 +946,19 @@ def up() -> None:
                     if profile_inst
                     else None
                 )
-                nlp_task = {
+                nlp_task: dict = {
                     "csv_path": str(nlp_csv),
-                    "field": field,
                     "id_field": metadata[0]["field_name"] if metadata else "record_id",
                     "output_dir": str(output_dir),
                     "field_identifiables_path": str(inst_data_dir / "identifiables.csv"),
                     "profile_identifiables_path": str(profile_ident) if profile_ident and profile_ident.exists() else None,
                 }
+                if len(fields) == 1:
+                    nlp_task["field"] = fields[0]
+                else:
+                    nlp_task["fields"] = fields
+                if id_level_field:
+                    nlp_task["id_level_field"] = id_level_field
                 nlp_result = run_r_task("nlp_text.R", nlp_task)
                 langues = nlp_result.get("langues", {})
                 lda_k = nlp_result.get("lda_k", {})
@@ -958,13 +967,13 @@ def up() -> None:
                     for lang, n in langues.items()
                 )
                 nlp_hashes = {
-                    f"nlp-{field}/{f.name}": sha256_file(f)
+                    f"nlp-{nlp_name}/{f.name}": sha256_file(f)
                     for f in output_dir.iterdir()
                     if f.is_file()
                 }
                 redcap_state[key]["files"].update(nlp_hashes)
                 save_redcap_state(name, redcap_state)
-                console.print(f"    [green]✓[/green] NLP {field} — {lang_summary or 'vide'}")
+                console.print(f"    [green]✓[/green] NLP {nlp_name} — {lang_summary or 'vide'}")
 
         file_nlp_entries = [
             e for e in (cfg.get("file_fields_nlp") or [])
@@ -1188,10 +1197,23 @@ def up() -> None:
                         writer.writeheader()
                         for i, ref in enumerate(all_merged_refs):
                             writer.writerow({"ref_id": i, **ref})
+                    # Grouper les titres par chercheur (hashed_id) → un texte par chercheur
+                    by_researcher: dict[str, list[str]] = {}
+                    for ref in all_merged_refs:
+                        hid = ref.get("hashed_id") or ref.get("ref_id", "unknown")
+                        title = (ref.get("title") or "").strip()
+                        if title:
+                            by_researcher.setdefault(str(hid), []).append(title)
+                    merged_by_researcher_csv = merged_dir / "by_researcher.csv"
+                    with merged_by_researcher_csv.open("w", newline="", encoding="utf-8") as fh:
+                        writer2 = csv.DictWriter(fh, fieldnames=["hashed_id", "text"])
+                        writer2.writeheader()
+                        for hid, titles in by_researcher.items():
+                            writer2.writerow({"hashed_id": hid, "text": " ".join(titles)})
                     nlp_task = {
-                        "csv_path": str(merged_biblio_csv),
-                        "field": "title",
-                        "id_field": "ref_id",
+                        "csv_path": str(merged_by_researcher_csv),
+                        "field": "text",
+                        "id_field": "hashed_id",
                         "output_dir": str(merged_dir),
                     }
                     nlp_result = run_r_task("nlp_text.R", nlp_task)

@@ -32,21 +32,28 @@ task_idx <- which(args == "--task")
 if (length(task_idx) == 0L) stop("Argument --task manquant")
 task <- fromJSON(args[task_idx + 1L])
 
-required_fields <- c("csv_path", "field", "id_field", "output_dir")
+required_fields <- c("csv_path", "id_field", "output_dir")
 missing_fields <- required_fields[!required_fields %in% names(task)]
 if (length(missing_fields) > 0L) {
   stop(paste("Champs task manquants :", paste(missing_fields, collapse = ", ")))
 }
+if (is.null(task$field) && is.null(task$fields)) {
+  stop("Champs task manquants : field ou fields")
+}
+
+# Accepte soit "field" (scalaire) soit "fields" (liste)
+field_arg <- if (!is.null(task$fields)) as.character(task$fields) else task$field
 
 dir_create(task$output_dir, recurse = TRUE)
 
 result <- run_nlp_pipeline(
   csv_path                   = task$csv_path,
-  field                      = task$field,
+  field                      = field_arg,
   id_field                   = task$id_field,
   output_dir                 = task$output_dir,
   field_identifiables_path   = task$field_identifiables_path,
-  profile_identifiables_path = task$profile_identifiables_path
+  profile_identifiables_path = task$profile_identifiables_path,
+  id_level_field             = task$id_level_field
 )
 
 cat(toJSON(result, auto_unbox = TRUE))

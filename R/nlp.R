@@ -62,15 +62,24 @@ load_udpipe_model <- function(lang_code) {
 
 load_and_filter_texts <- function(csv_path, field, id_field) {
   df <- as.data.frame(read_csv(csv_path, show_col_types = FALSE))
-  if (!(field %in% names(df))) {
-    stop(sprintf("Champ '%s' absent de %s", field, csv_path))
+  # field peut être un vecteur de champs à concaténer
+  fields <- if (length(field) > 1L) field else field
+  missing_cols <- setdiff(fields, names(df))
+  if (length(missing_cols) > 0L) {
+    stop(sprintf("Champ(s) '%s' absent(s) de %s", paste(missing_cols, collapse = ", "), csv_path))
   }
   if (!(id_field %in% names(df))) {
     stop(sprintf("Champ id '%s' absent de %s", id_field, csv_path))
   }
-  vals <- as.character(df[[field]])
-  keep <- !is.na(vals) & vals != "" & vals != "NA" & vals != "***"
+  # Concaténer les champs avec un espace
+  vals <- apply(df[, fields, drop = FALSE], 1L, function(row) {
+    parts <- as.character(row)
+    parts <- parts[!is.na(parts) & parts != "" & parts != "NA" & parts != "***"]
+    if (length(parts) == 0L) NA_character_ else paste(parts, collapse = " ")
+  })
+  keep <- !is.na(vals) & vals != ""
   df <- df[keep, , drop = FALSE]
+  vals <- vals[keep]
   # Utilise hashed_id à la place de record_id si disponible et non obfusqué
   id_col <- if (id_field == "record_id" && "hashed_id" %in% names(df)) {
     hids <- as.character(df[["hashed_id"]])
@@ -80,7 +89,7 @@ load_and_filter_texts <- function(csv_path, field, id_field) {
   }
   data.frame(
     id = as.character(df[[id_col]]),
-    text = as.character(df[[field]]),
+    text = vals,
     stringsAsFactors = FALSE
   )
 }
@@ -140,8 +149,10 @@ tokenize_group <- function(df_lang, lang_code, output_dir) {
   pipeline$sup_min_chars <- !pipeline$sup_upos & !pipeline$sup_stopword & (nchar(pipeline$lemma) < 3L)
 
   # Hapax calculé uniquement sur les tokens qui survivent aux 3 filtres précédents
+  # Désactivé si le corpus est trop petit (< 30 docs) : quasi tous les termes seraient hapax
   survivants <- pipeline[!pipeline$sup_upos & !pipeline$sup_stopword & !pipeline$sup_min_chars, ]
-  if (nrow(survivants) > 0L) {
+  n_docs_corpus <- length(unique(df_lang$id))
+  if (nrow(survivants) > 0L && n_docs_corpus >= 30L) {
     doc_freq <- tapply(survivants$id, survivants$lemma, function(x) length(unique(x)))
     hapax_lemmes <- names(doc_freq)[doc_freq == 1L]
   } else {
@@ -208,7 +219,7 @@ run_lda <- function(tokens_df, lang_code, n_docs) {
     return(NULL)
   }
 
-  k_max <- min(20L, floor(n_docs / 2L))
+  k_max <- min(4L, floor(n_docs / 2L))
   if (k_max < 2L) {
     return(NULL)
   }
@@ -340,7 +351,8 @@ enrich_lda_individus <- function(individus_df, field_identifiables_path,
 
 run_nlp_pipeline <- function(csv_path, field, id_field, output_dir,
                              field_identifiables_path = NULL,
-                             profile_identifiables_path = NULL) {
+                             profile_identifiables_path = NULL,
+                             id_level_field = NULL) {
   df <- load_and_filter_texts(csv_path, field, id_field)
   if (nrow(df) == 0L) {
     write_nlp_empty(output_dir)
@@ -407,7 +419,9 @@ run_nlp_pipeline <- function(csv_path, field, id_field, output_dir,
   write_csv(topics_df, file.path(output_dir, "lda_topics.csv"))
   write_csv(individus_df, file.path(output_dir, "lda_individus.csv"))
 
-  id_level_field <- paste0(field, "_identification_level")
+  if (is.null(id_level_field)) {
+    id_level_field <- paste0(field[[1L]], "_identification_level")
+  }
   enrichi <- enrich_lda_individus(
     individus_df,
     field_identifiables_path    = field_identifiables_path,

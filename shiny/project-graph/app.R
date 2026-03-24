@@ -25,6 +25,7 @@ if (file.exists(lda_topics_path) && file.exists(lda_indiv_path) && file.exists(l
     mutate(lda_id = paste0("LDA_", topic))
   biblio <- read_csv(lda_biblio_path, show_col_types = FALSE) |>
     select(ref_id, hashed_id) |>
+    mutate(ref_id = as.character(ref_id)) |>
     distinct()
   source_ids <- read_csv(file.path(data_dir, "nlp-papers", "00_source.csv"),
     show_col_types = FALSE

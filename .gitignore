@@ -1,0 +1,26 @@
+# Configuration
+.env
+
+# Rapports générés
+reports/*.html
+
+# Build
+bin/
+
+# Quarto
+*_files/
+*_cache/
+.quarto/
+*.pdf
+*.html
+
+# Task
+.task/
+
+# ECRIN — état interne (généré, non versionné)
+.ecrin/
+
+# macOS
+.DS_Store
+.Rhistory
+ECRINV1_DATA_*.csv

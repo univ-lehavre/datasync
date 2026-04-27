@@ -1,0 +1,1230 @@
+---
+title: Projet ECRIN
+subtitle: Analyse de la première vague d’enquêtes
+date: today
+lang: fr
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: Sommaire
+    theme: cosmo
+    embed-resources: true
+    code-fold: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{=html}
+<style>
+table {
+  margin-left: auto;
+  margin-right: auto;
+}
+table.conf-aud {
+  table-layout: fixed;
+  width: auto;
+}
+table.conf-aud th:nth-child(1),
+table.conf-aud td:nth-child(1) { width: 12em; text-align: left; }
+table.conf-aud th:nth-child(2),
+table.conf-aud td:nth-child(2) {
+  width: 3em; text-align: center;
+  border-left: 1px solid #dee2e6;
+  border-right: 1px solid #dee2e6;
+}
+table.conf-aud th:nth-child(n+3),
+table.conf-aud td:nth-child(n+3) { width: 8em; text-align: center; }
+</style>
+```
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+project_dir <- dirname(knitr::current_input(dir = TRUE))
+
+data_raw <- read_delim(
+  file.path(project_dir, "..", "ECRINV1_DATA_2026-03-18_1018.csv"),
+  delim = ";", show_col_types = FALSE, name_repair = "minimal"
+)
+
+data_labels <- read_delim(
+  file.path(project_dir, "..", "ECRINV1_DATA_LABELS_2026-03-18_1113.csv"),
+  delim = ";", show_col_types = FALSE, name_repair = "minimal"
+)
+```
+
+Le projet ECRIN vise à faciliter les interactions entre chercheurs. Dans ce but, une enquête a été mise en place à l’aide d’un questionnaire en ligne. Ce questionnaire est administré avec le logiciel [REDCap](https://www.project-redcap.org).
+
+Notre enquête comporte quatre formulaires, ou instruments selon la terminologie de REDCap, chaque instrument correspondant à une thématique. Les participants sont invités par courriel à répondre de manière successive et dans le même ordre à ces instruments. 
+
+## Participation
+
+```{r}
+#| label: n-participants
+n_participants <- nrow(data_raw)
+```
+
+
+Sur 45 personnes contactées, `r n_participants` chercheurs ont souhaité participer à notre première vague d’enquêtes.
+
+```{r}
+#| label: participation-instruments
+instruments <- c(
+  "researcher_profile_complete",
+  "research_questions_complete",
+  "publications_complete",
+  "project_proposal_complete"
+)
+labels <- c(
+  "Profil chercheur",
+  "Questions de recherche",
+  "Publications",
+  "Proposition de projet"
+)
+
+tibble(
+  Instrument = labels,
+  Complété = map_int(instruments, ~ sum(data_raw[[.x]] == 2, na.rm = TRUE)),
+  `Non complété` = map_int(instruments, ~ sum(data_raw[[.x]] != 2 | is.na(data_raw[[.x]]), na.rm = TRUE))
+) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+### Conclusion
+
+La participation est très élevée — 100% des volontaires ont répondu — sauf pour l’instrument lié à la proposition de projet. Ce dernier instrument est différent des autres et demande beaucoup d’investissement à l’enquêté.
+
+Nous sommes en présence d’une communauté active, ce qui est de bonne augure pour la suite du projet.
+
+## Profil du chercheur
+
+```{r}
+#| label: portrait-choix-camembert
+#| fig-width: 10
+#| fig-height: 5
+choix_portrait <- c(
+  "1" = "Avatar généré",
+  "2" = "Photo de moi",
+  "3" = "Rien"
+)
+
+pie_portrait <- data_raw |>
+  filter(researcher_profile_complete == 2) |>
+  mutate(choix = choix_portrait[as.character(portrait_choice)]) |>
+  count(choix) |>
+  mutate(pct = n / sum(n), label = paste0(n, "\n(", round(pct * 100), "%)")) |>
+  ggplot(aes(x = "", y = n, fill = choix)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  scale_fill_brewer(palette = "Set2", guide = guide_legend(nrow = 2)) +
+  labs(title = "Choix du portrait", fill = NULL) +
+  theme_void() +
+  theme(legend.position = "bottom")
+
+prof_inst <- read_csv(
+  file.path(project_dir, "..", ".ecrin", "admin", "downloads", "researcher_profile", "identifiables.csv"),
+  show_col_types = FALSE
+)
+
+abrev_inst <- c(
+  "Université Le Havre Normandie (ULHN)" = "ULHN",
+  "Centre National de la Recherche Scientifique (CNRS)" = "CNRS",
+  "Universidade dos Açores (UAC)" = "UAC"
+)
+
+pie_institution <- prof_inst |>
+  mutate(
+    inst_full = if_else(!is.na(institution_other) & institution_other != "", institution_other, institution),
+    inst = if_else(inst_full %in% names(abrev_inst), abrev_inst[inst_full], inst_full)
+  ) |>
+  count(inst) |>
+  mutate(pct = n / sum(n), label = paste0(n, "\n(", round(pct * 100), "%)")) |>
+  ggplot(aes(x = "", y = n, fill = inst)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = "Affiliations", fill = NULL) +
+  theme_void() +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(pie_portrait, pie_institution, ncol = 2)
+```
+
+### Trombinoscope
+
+```{r}
+#| label: trombinoscope
+#| results: asis
+identifiables <- read_csv(
+  file.path(project_dir, "..", ".ecrin", "admin", "downloads", "researcher_profile", "identifiables.csv"),
+  show_col_types = FALSE
+)
+
+img_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads", "researcher_profile", "files")
+
+all_profiles <- identifiables |>
+  arrange(last_name, first_name) |>
+  mutate(
+    middle_part = if_else(!is.na(middle_name) & middle_name != "", paste0(" ", middle_name), ""),
+    full_name   = paste0(str_to_title(first_name), middle_part, " ", str_to_title(last_name)),
+    img_src = case_when(
+      portrait_choice == "A picture of me" ~ {
+        p <- file.path(img_dir, paste0(hashed_id, "_portrait.", tools::file_ext(portrait)))
+        if_else(file.exists(p), p, paste0("https://api.dicebear.com/9.x/shapes/svg?seed=", hashed_id))
+      },
+      portrait_choice == "An avatar (automatically generated)" ~
+        paste0("https://api.dicebear.com/9.x/shapes/svg?seed=", hashed_id),
+      TRUE ~ NA_character_
+    )
+  )
+
+cards <- all_profiles |>
+  mutate(
+    card = if_else(
+      is.na(img_src),
+      paste0(
+        '<div style="text-align:center;display:inline-block;width:130px;margin:8px;vertical-align:top;">',
+        '<div style="width:110px;height:110px;"></div>',
+        '<div style="font-size:0.8em;margin-top:4px;">', full_name, '</div>',
+        '</div>'
+      ),
+      paste0(
+        '<div style="text-align:center;display:inline-block;width:130px;margin:8px;vertical-align:top;">',
+        '<img src="', img_src, '" style="width:110px;height:110px;object-fit:cover;border-radius:50%;"/>',
+        '<div style="font-size:0.8em;margin-top:4px;">', full_name, '</div>',
+        '</div>'
+      )
+    )
+  )
+
+htmltools::browsable(htmltools::HTML(paste0(
+  '<div style="display:flex;flex-wrap:wrap;justify-content:center;">',
+  paste(cards$card, collapse = ""),
+  '</div>'
+)))
+```
+
+### ORCID
+
+```{r}
+#| label: orcid-table
+identifiables |>
+  arrange(last_name, first_name) |>
+  mutate(
+    middle_part = if_else(!is.na(middle_name) & middle_name != "", paste0(" ", middle_name), ""),
+    Nom = paste0(str_to_title(first_name), middle_part, " ", str_to_title(last_name)),
+    ORCID = if_else(
+      !is.na(orcid) & str_trim(orcid) != "",
+      paste0(
+        '<a href="https://orcid.org/', str_trim(orcid), '" target="_blank">',
+        str_trim(orcid), '</a>'
+      ),
+      "—"
+    )
+  ) |>
+  mutate(`#` = row_number()) |>
+  select(`#`, Nom, ORCID) |>
+  knitr::kable(format = "html", escape = FALSE) |>
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+## Questions de recherche
+
+Les questions de recherche ne comportent pas assez de mots communs entre chercheurs. Une analyse thématique n’est pas possible.
+
+```{r}
+#| label: research-questions-table
+rq_identifiables <- read_csv(
+  file.path(project_dir, "..", ".ecrin", "admin", "downloads", "research_questions", "identifiables.csv"),
+  show_col_types = FALSE
+)
+
+identifiables |>
+  arrange(last_name, first_name) |>
+  mutate(
+    middle_part = if_else(!is.na(middle_name) & middle_name != "", paste0(" ", middle_name), ""),
+    Nom = paste0(str_to_title(first_name), middle_part, " ", str_to_title(last_name))
+  ) |>
+  left_join(rq_identifiables |> select(hashed_id, research_questions), by = "hashed_id") |>
+  mutate(
+    `#` = row_number(),
+    `Questions de recherche` = if_else(
+      !is.na(research_questions) & research_questions != "",
+      research_questions,
+      "—"
+    )
+  ) |>
+  select(`#`, Nom, `Questions de recherche`) |>
+  knitr::kable(format = "html", escape = TRUE) |>
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE) |>
+  kableExtra::column_spec(3, width = "60%")
+```
+
+
+
+## Publications
+
+Les noms de co-auteurs et les titres sont extraits automatiquement depuis les listes de publications. La qualité de l'extraction dépend de la mise en forme de chaque document : les formats hétérogènes peuvent introduire des doublons ou des noms mal parsés, ainsi que des titres bruités.
+
+### Analyse des titres extraits
+
+```{r}
+#| label: publi-nlp-setup
+#| include: false
+pub_nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                         "publications", "nlp-publications")
+
+pub_source  <- read_csv(file.path(pub_nlp_dir, "00_source.csv"),    show_col_types = FALSE)
+pub_topics  <- read_csv(file.path(pub_nlp_dir, "lda_topics.csv"),   show_col_types = FALSE) |>
+  group_by(langue) |> filter(k == max(k)) |> ungroup()
+pub_indivs  <- read_csv(file.path(pub_nlp_dir, "lda_individus.csv"),show_col_types = FALSE)
+pub_tfidf   <- read_csv(file.path(pub_nlp_dir, "tfidf.csv"),        show_col_types = FALSE)
+bib_refs    <- read_csv(file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                                  "publications", "extracted-publications", "biblio_refs.csv"),
+                        show_col_types = FALSE)
+
+pub_topic_colors <- c("1" = "#e41a1c", "2" = "#377eb8", "3" = "#4daf4a",
+                      "4" = "#ff7f00", "5" = "#984ea3")
+
+prof_ids <- read_csv(file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                               "researcher_profile", "identifiables.csv"),
+                     show_col_types = FALSE) |>
+  select(hashed_id, last_name, first_name) |>
+  mutate(full_name = paste0(str_to_title(first_name), " ", str_to_title(last_name)))
+```
+
+#### Distribution des langues
+
+```{r}
+#| label: publi-langues
+#| fig-width: 8
+#| fig-height: 4
+lang_labels <- c(
+  en = "Anglais", fr = "Français", unknown = "Indéterminée",
+  ja = "Japonais", ca = "Catalan", cy = "Gallois",
+  de = "Allemand", la = "Latin", bs = "Bosnien",
+  mt = "Maltais", ny = "Chichewa", fy = "Frison"
+)
+
+pub_source |>
+  mutate(langue_label = coalesce(lang_labels[langue], langue)) |>
+  count(langue_label) |>
+  mutate(
+    langue_label = fct_reorder(langue_label, n),
+    pct = n / sum(n),
+    label = paste0(n, " (", round(pct * 100), "%)")
+  ) |>
+  ggplot(aes(x = langue_label, y = n, fill = langue_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  geom_text(aes(label = label), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 145)) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa"
+  ), na.value = "#cccccc") +
+  labs(x = NULL, y = "Nombre de titres",
+       title = "Distribution des langues détectées",
+       subtitle = paste0("N = ", nrow(pub_source), " titres extraits")) +
+  theme_minimal()
+```
+
+#### Distribution de la longueur des titres
+
+```{r}
+#| label: publi-longueur
+#| fig-width: 9
+#| fig-height: 4
+pub_source |>
+  mutate(langue_grp = case_when(
+    langue == "en"      ~ "Anglais",
+    langue == "fr"      ~ "Français",
+    langue == "unknown" ~ "Indéterminée",
+    TRUE                ~ "Autre"
+  )) |>
+  ggplot(aes(x = n_tokens, fill = langue_grp)) +
+  geom_histogram(binwidth = 2, color = "white", alpha = 0.85) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa", "Autre" = "#74c476"
+  )) +
+  geom_vline(xintercept = 3, linetype = "dashed", color = "#888", linewidth = 0.6) +
+  annotate("text", x = 3.5, y = Inf, label = "Seuil artefact", vjust = 1.5,
+           hjust = 0, size = 3, color = "#888") +
+  labs(x = "Nombre de mots", y = "Nombre de titres", fill = "Langue",
+       title = "Longueur des titres extraits",
+       subtitle = "Les titres très courts (≤ 3 mots) sont probablement des artefacts d'extraction") +
+  theme_minimal()
+```
+
+#### Termes discriminants
+
+```{r}
+#| label: publi-tfidf
+#| fig-width: 10
+#| fig-height: 6
+pub_tfidf |>
+  filter(langue %in% c("en", "fr")) |>
+  mutate(langue_label = if_else(langue == "en", "Anglais", "Français")) |>
+  group_by(langue_label) |>
+  slice_max(tf_idf_moyen, n = 20) |>
+  ungroup() |>
+  mutate(token = fct_reorder(token, tf_idf_moyen)) |>
+  ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
+  geom_point(alpha = 0.85) +
+  facet_wrap(~ langue_label, scales = "free_y") +
+  coord_flip() +
+  scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb docs") +
+  scale_size_continuous(range = c(3, 10), guide = "none") +
+  labs(x = NULL, y = "TF-IDF moyen",
+       title = "Top 20 termes discriminants des titres (TF-IDF)") +
+  theme_minimal()
+```
+
+
+### Conclusion
+
+Nous allons implémenter le réseau de co-auteurs dans l’application Shiny. L’affectation d’un chercheur à une ou plusieurs topics n’est pas possible actuellement.
+
+## Proposition de projet
+
+### Analyse NLP — Titre & abstract
+
+```{r}
+#| label: proj-nlp-setup
+#| include: false
+proj_nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                           "project_proposal", "nlp-title_abstract")
+
+proj_nlp_source <- read_csv(file.path(proj_nlp_dir, "00_source.csv"), show_col_types = FALSE)
+proj_nlp_tfidf  <- read_csv(file.path(proj_nlp_dir, "tfidf.csv"),     show_col_types = FALSE)
+```
+
+#### Distribution des langues
+
+```{r}
+#| label: proj-nlp-langues
+#| fig-width: 8
+#| fig-height: 4
+lang_labels_proj <- c(
+  en = "Anglais", fr = "Français", unknown = "Indéterminée",
+  de = "Allemand", es = "Espagnol", it = "Italien", nl = "Néerlandais"
+)
+
+proj_nlp_source |>
+  mutate(langue_label = coalesce(lang_labels_proj[langue], langue)) |>
+  count(langue_label) |>
+  mutate(
+    langue_label = fct_reorder(langue_label, n),
+    pct   = n / sum(n),
+    label = paste0(n, " (", round(pct * 100), "%)")
+  ) |>
+  ggplot(aes(x = langue_label, y = n, fill = langue_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  geom_text(aes(label = label), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, max(count(proj_nlp_source, langue)$n) * 1.25)) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d", "Indéterminée" = "#aaaaaa"
+  ), na.value = "#cccccc") +
+  labs(x = NULL, y = "Nombre de textes",
+       title = "Distribution des langues détectées",
+       subtitle = paste0("N = ", nrow(proj_nlp_source), " textes (titre + abstract)")) +
+  theme_minimal()
+```
+
+#### Distribution de la longueur des textes
+
+```{r}
+#| label: proj-nlp-longueur
+#| fig-width: 9
+#| fig-height: 4
+proj_nlp_source |>
+  mutate(langue_grp = case_when(
+    langue == "en"      ~ "Anglais",
+    langue == "fr"      ~ "Français",
+    langue == "unknown" ~ "Indéterminée",
+    TRUE                ~ "Autre"
+  )) |>
+  ggplot(aes(x = n_tokens, fill = langue_grp)) +
+  geom_histogram(binwidth = 20, color = "white", alpha = 0.85) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa", "Autre" = "#74c476"
+  )) +
+  labs(x = "Nombre de mots", y = "Nombre de textes", fill = "Langue",
+       title = "Longueur des textes (titre + abstract)",
+       subtitle = "Distribution du nombre de tokens par projet") +
+  theme_minimal()
+```
+
+### Analyse NLP — Papiers joints
+
+```{r}
+#| label: proj-papers-nlp-setup
+#| include: false
+papers_nlp_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads",
+                              "project_proposal", "nlp-papers")
+
+papers_source <- read_csv(file.path(papers_nlp_dir, "00_source.csv"), show_col_types = FALSE)
+papers_tfidf  <- read_csv(file.path(papers_nlp_dir, "tfidf.csv"),     show_col_types = FALSE)
+```
+
+#### Distribution des langues
+
+```{r}
+#| label: proj-papers-langues
+#| fig-width: 8
+#| fig-height: 4
+lang_labels_papers <- c(
+  en = "Anglais", fr = "Français", unknown = "Indéterminée",
+  de = "Allemand", es = "Espagnol", it = "Italien",
+  ja = "Japonais", da = "Danois", ht = "Haïtien"
+)
+
+papers_source |>
+  mutate(langue_label = coalesce(lang_labels_papers[langue], langue)) |>
+  count(langue_label) |>
+  mutate(
+    langue_label = fct_reorder(langue_label, n),
+    pct   = n / sum(n),
+    label = paste0(n, " (", round(pct * 100), "%)")
+  ) |>
+  ggplot(aes(x = langue_label, y = n, fill = langue_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  geom_text(aes(label = label), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, max(count(papers_source, langue)$n) * 1.25)) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d", "Indéterminée" = "#aaaaaa"
+  ), na.value = "#cccccc") +
+  labs(x = NULL, y = "Nombre de textes",
+       title = "Distribution des langues détectées",
+       subtitle = paste0("N = ", nrow(papers_source), " chercheurs (titres concaténés par chercheur)")) +
+  theme_minimal()
+```
+
+#### Distribution de la longueur des textes
+
+```{r}
+#| label: proj-papers-longueur
+#| fig-width: 9
+#| fig-height: 4
+papers_source |>
+  mutate(langue_grp = case_when(
+    langue == "en"      ~ "Anglais",
+    langue == "fr"      ~ "Français",
+    langue == "unknown" ~ "Indéterminée",
+    TRUE                ~ "Autre"
+  )) |>
+  ggplot(aes(x = n_tokens, fill = langue_grp)) +
+  geom_histogram(binwidth = 10, color = "white", alpha = 0.85) +
+  scale_fill_manual(values = c(
+    "Anglais" = "#2166ac", "Français" = "#d6604d",
+    "Indéterminée" = "#aaaaaa", "Autre" = "#74c476"
+  )) +
+  labs(x = "Nombre de mots", y = "Nombre de chercheurs", fill = "Langue",
+       title = "Longueur du corpus par chercheur (titres concaténés)") +
+  theme_minimal()
+```
+
+#### Termes discriminants (TF-IDF)
+
+```{r}
+#| label: proj-papers-tfidf
+#| fig-width: 10
+#| fig-height: 6
+tfidf_papers_filtered <- papers_tfidf |>
+  filter(langue %in% c("en", "fr")) |>
+  mutate(langue_label = if_else(langue == "en", "Anglais", "Français"))
+
+if (nrow(tfidf_papers_filtered) == 0) {
+  message("TF-IDF papiers non disponible")
+} else {
+  tfidf_papers_filtered |>
+    group_by(langue_label) |>
+    slice_max(tf_idf_moyen, n = 20) |>
+    ungroup() |>
+    mutate(token = fct_reorder(token, tf_idf_moyen)) |>
+    ggplot(aes(x = token, y = tf_idf_moyen, size = n_docs, color = n_docs)) +
+    geom_point(alpha = 0.85) +
+    facet_wrap(~ langue_label, scales = "free_y") +
+    coord_flip() +
+    scale_color_gradient(low = "#c6dbef", high = "#08519c", name = "Nb papiers") +
+    scale_size_continuous(range = c(3, 10), guide = "none") +
+    labs(x = NULL, y = "TF-IDF moyen",
+         title = "Top 20 termes discriminants — Papiers joints (TF-IDF)") +
+    theme_minimal()
+}
+```
+
+### Intégration des projets dans ceux de l’Université
+
+```{r}
+#| label: ecr-eunicoast
+#| fig-width: 10
+#| fig-height: 5
+labels_ecr <- c(
+  "ecr_integration___1" = "Enjeux maritimes et portuaires",
+  "ecr_integration___2" = "La ville de demain : architecture, urbanisme,\nconstruction durable et design",
+  "ecr_integration___3" = "Transitions, risques et aléas"
+)
+
+labels_eunicoast <- c(
+  "eunicoast_integration___1" = "Identités, savoirs locaux et\npatrimoine culturel",
+  "eunicoast_integration___2" = "Économie circulaire bleue, logistique\nportuaire et tourisme bleu durable",
+  "eunicoast_integration___3" = "Gouvernance, planification,\ngestion et surveillance",
+  "eunicoast_integration___4" = "Santé, biodiversité et solutions\nfondées sur la nature",
+  "eunicoast_integration___5" = "Solutions ingéniées et numériques\npour les infrastructures côtières"
+)
+
+completed <- data_raw |> filter(researcher_profile_complete == 2)
+n_proj <- nrow(completed)
+
+plot_integration <- function(data, labels, titre, fill_color) {
+  cols <- names(labels)
+  data |>
+    select(all_of(cols)) |>
+    summarise(across(everything(), ~ sum(as.integer(.x) == 1, na.rm = TRUE))) |>
+    pivot_longer(everything(), names_to = "variable", values_to = "n") |>
+    mutate(
+      label = labels[variable],
+      label = factor(label, levels = rev(labels)),
+      pct   = n / n_proj
+    ) |>
+    ggplot(aes(x = label, y = n)) +
+    geom_col(fill = fill_color, alpha = 0.85, width = 0.6) +
+    geom_text(aes(label = paste0(n, " (", round(pct * 100), "%)")), hjust = -0.1, size = 3.5) +
+    coord_flip() +
+    scale_y_continuous(limits = c(0, n_proj + 2), breaks = scales::pretty_breaks()) +
+    labs(title = titre, x = NULL, y = paste0("Nombre de projets (N=", n_proj, ")")) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold"))
+}
+
+p_ecr      <- plot_integration(completed, labels_ecr,      "Intégration ECR",      "#fd7e14")
+p_eunicoast <- plot_integration(completed, labels_eunicoast, "Intégration EUNICoast", "#e83e8c")
+
+gridExtra::grid.arrange(p_ecr, p_eunicoast, ncol = 2)
+```
+
+#### Chord diagram ECR × EUNICoast
+
+```{r}
+#| label: chord-ecr-eunicoast
+#| fig-width: 10
+#| fig-height: 10
+library(circlize)
+
+ecr_short <- c(
+  "ecr_integration___1" = "ECR — Maritimes & portuaires",
+  "ecr_integration___2" = "ECR — Ville de demain",
+  "ecr_integration___3" = "ECR — Transitions & risques"
+)
+eunicoast_short <- c(
+  "eunicoast_integration___1" = "EUNICoast — Identités & patrimoine",
+  "eunicoast_integration___2" = "EUNICoast — Économie circulaire bleue",
+  "eunicoast_integration___3" = "EUNICoast — Gouvernance",
+  "eunicoast_integration___4" = "EUNICoast — Santé & biodiversité",
+  "eunicoast_integration___5" = "EUNICoast — Solutions ingéniées"
+)
+
+chord_mat <- matrix(
+  0L,
+  nrow = length(ecr_short),
+  ncol = length(eunicoast_short),
+  dimnames = list(unname(ecr_short), unname(eunicoast_short))
+)
+for (i in seq_along(ecr_short)) {
+  for (j in seq_along(eunicoast_short)) {
+    chord_mat[i, j] <- sum(
+      as.integer(completed[[names(ecr_short)[i]]]) == 1 &
+        as.integer(completed[[names(eunicoast_short)[j]]]) == 1,
+      na.rm = TRUE
+    )
+  }
+}
+
+all_colors <- c(
+  setNames(colorRampPalette(c("#fd9a4f", "#c85000"))(length(ecr_short)),       unname(ecr_short)),
+  setNames(colorRampPalette(c("#f48fb1", "#880e4f"))(length(eunicoast_short)), unname(eunicoast_short))
+)
+
+circos.clear()
+circos.par(gap.after = c(rep(3, length(ecr_short) - 1L), 10,
+                          rep(3, length(eunicoast_short) - 1L), 10))
+chordDiagram(
+  chord_mat,
+  grid.col          = all_colors,
+  transparency      = 0.4,
+  annotationTrack   = "grid",
+  preAllocateTracks = list(track.height = 0.15)
+)
+circos.trackPlotRegion(
+  track.index = 1,
+  panel.fun = function(x, y) {
+    sector <- get.cell.meta.data("sector.index")
+    xlim   <- get.cell.meta.data("xlim")
+    ylim   <- get.cell.meta.data("ylim")
+    circos.text(
+      mean(xlim), ylim[1] + 0.1, sector,
+      facing = "clockwise", niceFacing = TRUE,
+      adj = c(0, 0.5), cex = 0.7
+    )
+  },
+  bg.border = NA
+)
+circos.clear()
+```
+
+#### Co-occurrences ECR × EUNICoast
+
+```{r}
+#| label: heatmap-ecr-eunicoast
+#| fig-width: 10
+#| fig-height: 5
+expand.grid(
+  ecr       = names(ecr_short),
+  eunicoast = names(eunicoast_short),
+  stringsAsFactors = FALSE
+) |>
+  rowwise() |>
+  mutate(n = sum(
+    as.integer(completed[[ecr]]) == 1 &
+      as.integer(completed[[eunicoast]]) == 1,
+    na.rm = TRUE
+  )) |>
+  ungroup() |>
+  mutate(
+    ecr_label       = factor(ecr_short[ecr],            levels = unname(ecr_short)),
+    eunicoast_label = factor(eunicoast_short[eunicoast], levels = unname(eunicoast_short))
+  ) |>
+  ggplot(aes(x = eunicoast_label, y = ecr_label, fill = n)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = ifelse(n > 0, n, "")), size = 4.5, fontface = "bold") +
+  scale_fill_gradient(low = "#fff3e0", high = "#e65100", name = "Projets") +
+  scale_x_discrete(position = "top") +
+  labs(
+    title    = "Co-occurrences ECR × EUNICoast",
+    subtitle = "Nombre de projets cochant simultanément un axe ECR et un hub EUNICoast",
+    x = "EUNICoast", y = "ECR"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(hjust = 0),
+    panel.grid  = element_blank(),
+    plot.title  = element_text(face = "bold")
+  )
+```
+
+## Fiches chercheurs
+
+```{r}
+#| label: portfolio-setup
+#| include: false
+base_dir <- file.path(project_dir, "..", ".ecrin", "admin", "downloads")
+
+prof   <- read_csv(file.path(base_dir, "researcher_profile",  "identifiables.csv"), show_col_types = FALSE)
+rq     <- read_csv(file.path(base_dir, "research_questions",  "identifiables.csv"), show_col_types = FALSE)
+publi  <- read_csv(file.path(base_dir, "publications",        "identifiables.csv"), show_col_types = FALSE)
+proj   <- read_csv(file.path(base_dir, "project_proposal",    "identifiables.csv"), show_col_types = FALSE)
+
+img_dir_portrait <- file.path(base_dir, "researcher_profile", "files")
+img_dir_publi    <- file.path(base_dir, "publications",        "files")
+img_dir_proj     <- file.path(base_dir, "project_proposal",   "files")
+
+portrait_file <- function(hid, portrait_name) {
+  ext  <- tools::file_ext(portrait_name)
+  path <- file.path(img_dir_portrait, paste0(hid, "_portrait.", ext))
+  if (file.exists(path)) path else NA_character_
+}
+
+render_portrait <- function(path, hid, choice, size = "90px") {
+  if (choice == "An avatar (automatically generated)") {
+    src <- paste0("https://api.dicebear.com/9.x/shapes/svg?seed=", hid)
+    glue::glue('<img src="{src}" style="width:{size};height:{size};object-fit:cover;border-radius:50%;border:2px solid #dee2e6;"/>')
+  } else if (!is.na(path)) {
+    glue::glue('<img src="{path}" style="width:{size};height:{size};object-fit:cover;border-radius:50%;border:2px solid #dee2e6;"/>')
+  } else {
+    glue::glue('<div style="width:{size};height:{size};"></div>')
+  }
+}
+
+render_tags_outline <- function(items, color = "#0d6efd") {
+  items <- items[!is.na(items) & items != ""]
+  if (length(items) == 0) return("")
+  paste0(
+    '<span style="display:inline-block;background:transparent;color:', color,
+    ';border:1px solid ', color, ';border-radius:4px;padding:1px 7px;margin:2px;font-size:0.8em;">',
+    items, '</span>',
+    collapse = ""
+  )
+}
+
+render_tags <- function(items, color = "#0d6efd") {
+  items <- items[!is.na(items) & items != ""]
+  if (length(items) == 0) return("")
+  paste0(
+    '<span style="display:inline-block;background:', color, '22;color:', color,
+    ';border:1px solid ', color, '44;border-radius:4px;padding:1px 7px;margin:2px;font-size:0.8em;">',
+    items, '</span>',
+    collapse = ""
+  )
+}
+
+render_publi_link <- function(hid) {
+  files <- list.files(img_dir_publi, pattern = paste0("^", hid, "_publications\\."), full.names = TRUE)
+  if (length(files) == 0) return("")
+  path <- files[[1]]
+  ext  <- toupper(tools::file_ext(path))
+  glue::glue('<a href="{path}" style="font-size:0.85em;">\U0001f4c4 Publications</a>')
+}
+
+render_proposal_papers <- function(hid, papers) {
+  papers <- papers[!is.na(papers) & papers != ""]
+  if (length(papers) == 0) return("")
+  links <- purrr::imap_chr(papers, function(label, i) {
+    pattern <- paste0("^", hid, "_paper", i, "\\.")
+    files   <- list.files(img_dir_proj, pattern = pattern, full.names = TRUE)
+    if (length(files) > 0) {
+      path <- files[[1]]
+      glue::glue('<a href="{path}" style="font-size:0.85em;">\U0001f4c4 Article {i}</a>')
+    } else {
+      glue::glue('<span style="font-size:0.85em;color:#aaa;">\U0001f4c4 Article {i}</span>')
+    }
+  })
+  paste(links, collapse = " | ")
+}
+
+section_html <- function(title, content, color = "#495057") {
+  if (is.null(content) || is.na(content) || content == "") return("")
+  glue::glue(
+    '<div style="margin-top:10px;">',
+    '<div style="font-weight:600;color:{color};font-size:0.85em;text-transform:uppercase;',
+    'letter-spacing:.05em;margin-bottom:4px;">{title}</div>',
+    '<div>{content}</div>',
+    '</div>'
+  )
+}
+```
+
+```{r}
+#| label: portfolio-render
+#| results: asis
+cards_html <- purrr::map_chr(prof |> arrange(last_name, first_name) |> pull(userid), function(uid) {
+  p   <- prof |> filter(userid == uid)
+  hid <- p$hashed_id
+
+  # Portrait
+  img_path     <- if (!is.na(p$portrait) && p$portrait != "") portrait_file(hid, p$portrait) else NA_character_
+  portrait_html <- render_portrait(img_path, hid, coalesce(p$portrait_choice, ""))
+
+  # Identit\u00e9
+  middle    <- if (!is.na(p$middle_name) && p$middle_name != "") paste0(" ", p$middle_name) else ""
+  full_name <- paste0(str_to_title(p$first_name), middle, " ", str_to_title(p$last_name))
+  institution <- if (!is.na(p$institution_other) && p$institution_other != "") p$institution_other else p$institution
+
+  orcid_val  <- str_trim(coalesce(p$orcid, ""))
+  orcid_html <- if (orcid_val != "") {
+    orcid_url <- if (startsWith(orcid_val, "http")) orcid_val else paste0("https://orcid.org/", orcid_val)
+    glue::glue('<a href="{orcid_url}" style="font-size:0.8em;color:#a6ce39;">\u2b21 ORCID</a>')
+  } else ""
+
+  # Questions de recherche
+  rq_row  <- rq |> filter(userid == uid)
+  rq_html <- if (nrow(rq_row) > 0 && !is.na(rq_row$research_questions) && rq_row$research_questions != "") {
+    paste0('<div style="font-size:0.85em;font-style:italic;">', rq_row$research_questions, '</div>')
+  } else ""
+
+  # Intégrations ECR / EUNICoast
+  raw_row <- data_raw |> filter(userid == uid)
+  ecr_choix <- c(
+    "ecr_integration___1" = "Enjeux maritimes et portuaires",
+    "ecr_integration___2" = "La ville de demain : architecture, urbanisme, construction durable et design",
+    "ecr_integration___3" = "Transitions, risques et aléas"
+  )
+  eunicoast_choix <- c(
+    "eunicoast_integration___1" = "Identités, savoirs locaux et patrimoine culturel",
+    "eunicoast_integration___2" = "Économie circulaire bleue, logistique portuaire et tourisme bleu durable",
+    "eunicoast_integration___3" = "Gouvernance, planification, gestion et surveillance",
+    "eunicoast_integration___4" = "Santé, biodiversité et solutions fondées sur la nature",
+    "eunicoast_integration___5" = "Solutions ingéniées et numériques pour les infrastructures côtières"
+  )
+  ecr_vals       <- if (nrow(raw_row) > 0) unname(ecr_choix[names(ecr_choix)[sapply(names(ecr_choix),      function(v) isTRUE(as.integer(raw_row[[v]][[1]]) == 1))]]) else character(0)
+  eunicoast_vals <- if (nrow(raw_row) > 0) unname(eunicoast_choix[names(eunicoast_choix)[sapply(names(eunicoast_choix), function(v) isTRUE(as.integer(raw_row[[v]][[1]]) == 1))]]) else character(0)
+  ecr_html       <- section_html("Intégration ECR",       render_tags(ecr_vals,       "#fd7e14"), "#fd7e14")
+  eunicoast_html <- section_html("Intégration EUNICoast", render_tags(eunicoast_vals, "#e83e8c"), "#e83e8c")
+
+  # Publications
+  refs_html <- render_publi_link(hid)
+
+  # Proposition de projet
+  proj_row  <- proj |> filter(userid == uid)
+  proj_html <- ""
+  if (nrow(proj_row) > 0) {
+    kw     <- c(proj_row$keyword1, proj_row$keyword2, proj_row$keyword3)
+    meth   <- c(proj_row$method1,  proj_row$method2,  proj_row$method3)
+    reg    <- c(proj_row$region1,  proj_row$region2,  proj_row$region3)
+    papers <- c(proj_row$paper1,   proj_row$paper2,   proj_row$paper3)
+
+    title_proj <- ""
+    if (!is.na(proj_row$title) && proj_row$title != "") {
+      acronym_part <- if (!is.na(proj_row$acronym) && proj_row$acronym != "") {
+        paste0('<span style="display:inline-block;background:#198754;color:#fff;border-radius:4px;padding:1px 8px;font-size:0.85em;font-weight:700;margin-right:8px;vertical-align:middle;">', proj_row$acronym, '</span>')
+      } else ""
+      title_proj <- paste0(acronym_part, '<span style="font-size:1em;font-weight:600;font-style:italic;color:#198754;">', proj_row$title, '</span>')
+    }
+
+    abstract_proj <- if (!is.na(proj_row$abstract) && proj_row$abstract != "") {
+      paste0('<div style="font-size:0.83em;margin-top:6px;color:#555;">', proj_row$abstract, '</div>')
+    } else ""
+
+    papers_html <- render_proposal_papers(hid, papers)
+
+    topic_html <- if (!is.na(proj_row$topic) && proj_row$topic != "") {
+      render_tags(proj_row$topic, "#20c997")
+    } else ""
+
+    logo_dir <- file.path(project_dir)
+
+    integration_html <- ""
+    parts <- c()
+    if (length(ecr_vals) > 0) {
+      parts <- c(parts, paste0(
+        '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">',
+        '<img src="cptmp.png" style="height:24px;object-fit:contain;margin-top:3px;flex-shrink:0;"/>',
+        '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;">',
+        render_tags_outline(ecr_vals, "#8B0000"),
+        '</div></div>'
+      ))
+    }
+    if (length(eunicoast_vals) > 0) {
+      parts <- c(parts, paste0(
+        '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;">',
+        '<img src="eunicoast.png" style="height:24px;object-fit:contain;margin-top:3px;flex-shrink:0;"/>',
+        '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;">',
+        render_tags_outline(eunicoast_vals, "#8B0000"),
+        '</div></div>'
+      ))
+    }
+    if (length(parts) > 0) {
+      integration_html <- section_html(
+        "Int\u00e9gration dans les projets de l\u2019Universit\u00e9",
+        paste(parts, collapse = ""),
+        "#8B0000"
+      )
+    }
+
+    proj_inner <- paste0(
+      title_proj, abstract_proj,
+      integration_html,
+      section_html("Th\u00e9matique", topic_html, "#20c997"),
+      section_html("Mots-cl\u00e9s",          render_tags(kw,   "#0d6efd"), "#0d6efd"),
+      section_html("M\u00e9thodes",            render_tags(meth, "#6f42c1"), "#6f42c1"),
+      section_html("R\u00e9gions",             render_tags(reg,  "#0dcaf0"), "#0dcaf0"),
+      if (papers_html != "") section_html("Articles soumis", papers_html, "#795548") else ""
+    )
+    proj_html <- section_html("Proposition de projet", proj_inner, "#000000")
+
+  }
+
+  glue::glue(
+    '<div style="border:1px solid #dee2e6;border-radius:8px;padding:20px;margin-bottom:24px;',
+    'background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06);">',
+    '  <div style="display:flex;align-items:flex-start;gap:16px;">',
+    '    <div style="flex-shrink:0;">{portrait_html}</div>',
+    '    <div style="flex:1;min-width:0;">',
+    '      <div style="font-size:1.15em;font-weight:700;">{full_name}</div>',
+    '      <div style="color:#6c757d;font-size:0.9em;">{institution}</div>',
+    '      <div style="margin-top:2px;">{orcid_html}</div>',
+    '    </div>',
+    '  </div>',
+    '  {section_html("Questions de recherche", rq_html, "#000000")}',
+    '  {section_html("Publications", refs_html, "#000000")}',
+    '  {proj_html}',
+    '</div>'
+  )
+})
+
+htmltools::browsable(htmltools::HTML(paste(cards_html, collapse = "\n")))
+```
+
+
+
+## Niveau de confidentialité et audience
+
+Pour chaque instrument, nous proposons à l’enquêté de choisir un niveau de confidentialité parmi trois options :
+
+- données identifiables (nom visible), 
+- pseudonymisées (un identifiant remplace le nom), 
+- ou agrégées uniquement (statistiques globales sans données individuelles). 
+
+Il choisit également l’audience autorisée à accéder à ses données :
+
+- les chercheurs authentifiés uniquement,
+- ou le grand public.
+
+```{r}
+#| label: confidentialite-tableau
+instruments_conf <- list(
+  "Profil chercheur"        = c("researcher_profile_identification_level", "researcher_profile_data_audience"),
+  "Questions de recherche"  = c("research_questions_identification_level", "research_questions_data_audience"),
+  "Publications"            = c("publications_identification_level", "publications_data_audience"),
+  "Proposition de projet"   = c("project_proposal_identification_level", "project_proposal_data_audience")
+)
+
+niveaux_conf <- c(
+  "1" = "Identifiable",
+  "2" = "Pseudonymisé",
+  "3" = "Anonymisé",
+  "4" = "Agrégé uniquement"
+)
+ordre_conf <- c("Identifiable", "Pseudonymisé", "Anonymisé", "Agrégé uniquement")
+
+niveaux_aud <- c(
+  "1" = "Grand public",
+  "2" = "Chercheurs authentifiés"
+)
+
+ordre_aud <- c("Grand public", "Chercheurs authentifiés")
+
+complete_cols <- c(
+  "Profil chercheur"       = "researcher_profile_complete",
+  "Questions de recherche" = "research_questions_complete",
+  "Publications"           = "publications_complete",
+  "Proposition de projet"  = "project_proposal_complete"
+)
+
+pct <- function(counts, niveaux) {
+  vals <- paste0(round(as.integer(counts) / sum(as.integer(counts)) * 100), "%")
+  setNames(as.list(vals), niveaux)
+}
+
+map_dfr(names(instruments_conf), function(inst) {
+  conf <- factor(niveaux_conf[as.character(data_raw[[instruments_conf[[inst]][1]]])], levels = ordre_conf)
+  n    <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
+  as_tibble(pct(table(conf)[ordre_conf], ordre_conf)) |>
+    mutate(Instrument = inst, `N` = n, .before = 1)
+}) |>
+  kable(caption = "Confidentialité", align = c("l", "c", rep("c", length(ordre_conf)))) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
+
+map_dfr(names(instruments_conf), function(inst) {
+  aud <- factor(niveaux_aud[as.character(data_raw[[instruments_conf[[inst]][2]]])], levels = ordre_aud)
+  n   <- sum(data_raw[[complete_cols[inst]]] == 2, na.rm = TRUE)
+  as_tibble(pct(table(aud)[ordre_aud], ordre_aud)) |>
+    mutate(Instrument = inst, `N` = n, .before = 1)
+}) |>
+  kable(caption = "Audience", align = c("l", "c", rep("c", length(ordre_aud)))) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE, htmltable_class = "conf-aud")
+```
+
+### Comportements observés
+
+Les participants sont regroupés par classification ascendante hiérarchique (CAH) sur la base de leurs choix de confidentialité et d'audience pour les quatre instruments. La dissimilarité entre individus est mesurée par la distance de Gower, adaptée aux variables ordinales à échelles mixtes. L'agrégation suit la méthode UPGMA (*average linkage*), qui fusionne les groupes selon la dissimilarité moyenne entre leurs membres — un choix cohérent avec une matrice de Gower non euclidienne, contrairement à la méthode de Ward. Le dendrogramme est découpé en 5 groupes.
+
+```{r}
+#| label: comportements-hclust
+#| fig-width: 10
+#| fig-height: 5
+cols_behav <- c(
+  "researcher_profile_identification_level", "researcher_profile_data_audience",
+  "research_questions_identification_level", "research_questions_data_audience",
+  "publications_identification_level", "publications_data_audience",
+  "project_proposal_identification_level", "project_proposal_data_audience"
+)
+
+mat <- data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), "0"))))
+
+d   <- cluster::daisy(mat, metric = "gower")
+hc  <- hclust(d, method = "average")
+k   <- 5
+clusters <- cutree(hc, k = k)
+
+par(mar = c(2, 2, 3, 1))
+plot(hc, labels = FALSE, main = "Dendrogramme des comportements (UPGMA, distance de Gower)", xlab = "", sub = "")
+rect.hclust(hc, k = k, border = c("#e41a1c", "#377eb8", "#4daf4a", "#ff7f00", "#984ea3"))
+```
+
+```{r}
+#| label: comportements-individus
+#| include: false
+data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(ends_with("_identification_level"), ~ niveaux_conf[as.character(.x)])) |>
+  mutate(across(ends_with("_data_audience"),        ~ niveaux_aud[as.character(.x)])) |>
+  mutate(Groupe = factor(clusters)) |>
+  arrange(Groupe) |>
+  set_names(c(
+    "Conf.", "Aud.", "Conf.", "Aud.",
+    "Conf.", "Aud.", "Conf.", "Aud.",
+    "Groupe"
+  )) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
+  add_header_above(c(
+    "Profil chercheur" = 2,
+    "Questions de recherche" = 2,
+    "Publications" = 2,
+    "Proposition de projet" = 2,
+    " " = 1
+  ))
+```
+
+
+```{r}
+#| label: profils-moyens
+col_labels <- c(
+  "Conf.", "Aud.", "Conf.", "Aud.",
+  "Conf.", "Aud.", "Conf.", "Aud."
+)
+
+data_raw |>
+  select(all_of(cols_behav)) |>
+  mutate(across(everything(), ~ as.integer(replace_na(as.character(.x), NA_character_)))) |>
+  mutate(Groupe = factor(clusters)) |>
+  group_by(Groupe) |>
+  summarise(
+    N = n(),
+    across(all_of(cols_behav), ~ {
+      tbl <- sort(table(.x), decreasing = TRUE)
+      modal_val <- as.integer(names(tbl)[1])
+      if (endsWith(cur_column(), "_identification_level")) {
+        niveaux_conf[as.character(modal_val)]
+      } else {
+        niveaux_aud[as.character(modal_val)]
+      }
+    }),
+    .groups = "drop"
+  ) |>
+  setNames(c("Groupe", "N", col_labels)) |>
+  kable(caption = "Profil modal par groupe") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE, font_size = 12) |>
+  add_header_above(c(
+    " " = 2,
+    "Profil chercheur" = 2,
+    "Questions de recherche" = 2,
+    "Publications" = 2,
+    "Proposition de projet" = 2
+  ))
+```
+
+### Comportements par instrument
+
+Les choix de confidentialité et d'audience sont-ils stables entre instruments, ou les participants adaptent-ils leurs préférences selon le type de données ?
+
+Le test de Cochran Q exige des réponses complètes sur tous les instruments, ce qui réduit ici l'échantillon à ~15 individus et pénalise sa puissance. Le test de Stuart-Maxwell est préférable : il s'applique par paires d'instruments et tolère les données manquantes. Il teste l'hypothèse de symétrie marginale — autrement dit, si la distribution des réponses est la même pour les deux instruments de la paire.
+
+```{r}
+#| label: stuart-maxwell
+cols_conf <- c(
+  "researcher_profile_identification_level",
+  "research_questions_identification_level",
+  "publications_identification_level",
+  "project_proposal_identification_level"
+)
+cols_aud <- c(
+  "researcher_profile_data_audience",
+  "research_questions_data_audience",
+  "publications_data_audience",
+  "project_proposal_data_audience"
+)
+
+stuart_maxwell <- function(x, y) {
+  d <- data.frame(x = as.integer(x), y = as.integer(y)) |> na.omit()
+  cats <- sort(unique(c(d$x, d$y)))
+  k <- length(cats)
+  if (k < 2) return(tibble(stat = NA_real_, df = NA_integer_, `p-value` = NA_real_, n = nrow(d)))
+  T_mat <- table(factor(d$x, cats), factor(d$y, cats))
+  d_vec <- rowSums(T_mat) - colSums(T_mat)
+  S <- matrix(0, k, k)
+  for (i in 1:k) for (j in 1:k) {
+    S[i, j] <- if (i == j) rowSums(T_mat)[i] + colSums(T_mat)[i] - 2 * T_mat[i, i]
+               else        -(T_mat[i, j] + T_mat[j, i])
+  }
+  idx <- 1:(k - 1)
+  chi2 <- tryCatch(as.numeric(t(d_vec[idx]) %*% solve(S[idx, idx]) %*% d_vec[idx]), error = function(e) NA_real_)
+  p <- if (!is.na(chi2)) pchisq(chi2, df = k - 1, lower.tail = FALSE) else NA_real_
+  tibble(stat = round(chi2, 3), df = k - 1L, `p-value` = round(p, 4), n = nrow(d))
+}
+
+insts <- c("Profil", "Questions", "Publications", "Projet")
+pairs <- combn(4, 2)
+
+res_conf <- map_dfr(1:ncol(pairs), function(i) {
+  a <- pairs[1, i]; b <- pairs[2, i]
+  stuart_maxwell(data_raw[[cols_conf[a]]], data_raw[[cols_conf[b]]]) |>
+    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
+})
+
+res_aud <- map_dfr(1:ncol(pairs), function(i) {
+  a <- pairs[1, i]; b <- pairs[2, i]
+  stuart_maxwell(data_raw[[cols_aud[a]]], data_raw[[cols_aud[b]]]) |>
+    mutate(Paire = paste(insts[a], "vs", insts[b]), .before = 1)
+})
+
+bind_rows(
+  res_conf |> mutate(Variable = "Confidentialité", .before = 1),
+  res_aud  |> mutate(Variable = "Audience",        .before = 1)
+) |>
+  kable(caption = "Test de Stuart-Maxwell par paire d'instruments") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  collapse_rows(columns = 1, valign = "top")
+```
+
+### Transitions entre instruments
+
+```{r}
+#| label: transitions-conf
+#| fig-width: 10
+#| fig-height: 5
+instruments_labels <- c("Profil", "Questions", "Publications", "Projet")
+
+bump_plot <- function(cols, niveaux_map, titre, palette) {
+  data_raw |>
+    select(all_of(cols)) |>
+    mutate(id = row_number()) |>
+    pivot_longer(-id, names_to = "instrument", values_to = "code") |>
+    mutate(
+      instrument = factor(instrument, levels = cols, labels = instruments_labels),
+      niveau = niveaux_map[as.character(code)]
+    ) |>
+    drop_na(niveau) |>
+    count(instrument, niveau) |>
+    mutate(niveau = factor(niveau, levels = rev(names(sort(table(niveau)))))) |>
+    ggplot(aes(x = instrument, y = n, color = niveau, group = niveau)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_text(aes(label = n), vjust = -0.8, size = 3.5, show.legend = FALSE) +
+    scale_color_brewer(palette = palette) +
+    labs(title = titre, x = NULL, y = "Participants", color = NULL) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+}
+
+bump_plot(cols_conf, niveaux_conf, "Confidentialité par instrument", "Set2")
+```
+
+```{r}
+#| label: transitions-aud
+#| fig-width: 10
+#| fig-height: 4
+bump_plot(cols_aud, niveaux_aud, "Audience par instrument", "Set1")
+```
+
+### Conclusion
+
+Les chercheurs adopte à plus de 80% pour une confidentialité minimale de leurs données. Ils veulent être identifiés, sauf pour la proposition de projet. Une majorité d’entre eux préfèrent toutefois que leurs données soient présentées qu’à un auditoire de chercheurs, excepté pour les publications.
+
+Nous pourrions envisager une disposition commune pour toutes les données recueillies : identification nominative réservé à un auditoire de chercheurs.

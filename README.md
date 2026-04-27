@@ -1,35 +1,37 @@
 # Analyse Première Vague - ECRIN
 
+[![DOI](https://zenodo.org/badge/1185149042.svg)](https://doi.org/10.5281/zenodo.19821482)
+
 Ce répertoire contient le pipeline d'analyse de la première vague ECRIN : récupération
 REDCap, séparation des données selon les règles de diffusion, extraction de textes,
 analyses NLP, génération de rapports Quarto et visualisation Shiny.
 
 ## Contenu du répertoire
 
-| Chemin | Rôle |
-| ------ | ---- |
-| `ecrin.py` | CLI Python principal. Orchestre les stacks, les téléchargements REDCap, le cache, le rollback et les traitements NLP. |
-| `ecrin.R` | CLI R historique, encore utile pour des opérations ponctuelles ou interactives. |
-| `R/` | Fonctions R partagées : configuration, API REDCap, téléchargement, extraction, rapports, affichage. |
-| `tasks/` | Scripts appelés par le CLI Python pour les étapes de pipeline : métadonnées, contrôles, téléchargement, extraction de texte, NLP, bibliographie. |
-| `stacks/` | Configurations déclaratives par audience (`admin`, `chercheurs`, `public`). |
-| `.ecrin/` | État local généré : stack actif, cache REDCap, téléchargements par stack, backups et logs. |
-| `reports/` | Rapports Quarto et sorties générées, dont `analyse-globale-admin.html`. |
-| `shiny/project-graph/` | Application Shiny de visualisation du graphe projet. |
-| `pyproject.toml`, `uv.lock` | Environnement Python géré par `uv`. |
-| `lint.R`, `.lintr`, `.pre-commit-config.yaml` | Outils de lint/format R et hooks Python Ruff. |
+| Chemin                                        | Rôle                                                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ecrin.py`                                    | CLI Python principal. Orchestre les stacks, les téléchargements REDCap, le cache, le rollback et les traitements NLP.                            |
+| `ecrin.R`                                     | CLI R historique, encore utile pour des opérations ponctuelles ou interactives.                                                                  |
+| `R/`                                          | Fonctions R partagées : configuration, API REDCap, téléchargement, extraction, rapports, affichage.                                              |
+| `tasks/`                                      | Scripts appelés par le CLI Python pour les étapes de pipeline : métadonnées, contrôles, téléchargement, extraction de texte, NLP, bibliographie. |
+| `stacks/`                                     | Configurations déclaratives par audience (`admin`, `chercheurs`, `public`).                                                                      |
+| `.ecrin/`                                     | État local généré : stack actif, cache REDCap, téléchargements par stack, backups et logs.                                                       |
+| `reports/`                                    | Rapports Quarto et sorties générées, dont `analyse-globale-admin.html`.                                                                          |
+| `shiny/project-graph/`                        | Application Shiny de visualisation du graphe projet.                                                                                             |
+| `pyproject.toml`, `uv.lock`                   | Environnement Python géré par `uv`.                                                                                                              |
+| `lint.R`, `.lintr`, `.pre-commit-config.yaml` | Outils de lint/format R et hooks Python Ruff.                                                                                                    |
 
 ## État local actuel
 
 Le stack actif est `admin`. Il dispose d'un cache local dans `.ecrin/admin/downloads`
 avec les instruments suivants, téléchargés le 2026-03-23 :
 
-| Instrument | Identifiables | Pseudonymisés | Anonymisés |
-| ---------- | ------------: | ------------: | ---------: |
-| `researcher_profile` | 25 | 0 | 0 |
-| `research_questions` | 25 | 0 | 0 |
-| `publications` | 22 | 0 | 0 |
-| `project_proposal` | 17 | 0 | 0 |
+| Instrument           | Identifiables | Pseudonymisés | Anonymisés |
+| -------------------- | ------------: | ------------: | ---------: |
+| `researcher_profile` |            25 |             0 |          0 |
+| `research_questions` |            25 |             0 |          0 |
+| `publications`       |            22 |             0 |          0 |
+| `project_proposal`   |            17 |             0 |          0 |
 
 Les stacks `public` et `chercheurs` existent, mais n'ont pas encore été exécutés
 localement.
@@ -127,12 +129,12 @@ uv run ecrin.py stack select public     # active ce stack
 
 ```yaml
 rapport:
-  titre: "Rapport ECRIN — Première vague"
-  audience: "public"        # "public" | "chercheurs"
+  titre: 'Rapport ECRIN — Première vague'
+  audience: 'public' # "public" | "chercheurs"
   format: [pdf]
-  output: "reports/rapport-ecrin-public.pdf"
+  output: 'reports/rapport-ecrin-public.pdf'
 
-instruments: auto           # détection automatique depuis REDCap
+instruments: auto # détection automatique depuis REDCap
 ```
 
 ### 2. Visualiser le plan avant d'agir
